@@ -1,80 +1,79 @@
 ---
 title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+description: "Register, connect your first API, and download a generated Django site in under 5 minutes."
 ---
 
-## Get started in three steps
+<Steps>
+  <Step title="Register an account">
+    Go to `/registro` and fill in your username, email, and password. After submitting, WebBuilder automatically logs you in and redirects you to the home page.
 
-Get your documentation site running locally and make your first customization.
+    <Note>
+      n8n sends a welcome email to the address you registered with. If you do not receive it, check that `N8N_WEBHOOK_REGISTRO` points to a running n8n instance and that your n8n workflow is active.
+    </Note>
+  </Step>
 
-### Step 1: Set up your local environment
+  <Step title="Open the assistant">
+    Navigate to `/asistente`. This is the four-step generation wizard where all site creation happens.
+  </Step>
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+  <Step title="Enter a public API URL">
+    Paste any URL that returns JSON or XML. WebBuilder fetches the response, detects the format automatically, and safely parses it.
 
-### Step 2: Deploy your changes
+    Some good examples to try:
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    ```text
+    https://jsonplaceholder.typicode.com/posts
+    https://api.publicapis.org/entries
+    ```
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+    You can also upload a local `.json` or `.xml` file using the file input on the same form.
+  </Step>
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+  <Step title="Choose an LLM model">
+    Select a model from the catalog shown on the analysis page. The catalog includes models from OpenRouter and Groq. If you have configured a personal LLM in your profile (`/perfil`), that model is used instead of the server default.
+  </Step>
 
-### Step 3: Go live
+  <Step title="Review the AI plan">
+    The LLM analyses the dataset and returns a structured plan that includes:
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    - The recommended site type (blog, catalogue, portfolio, dashboard, and so on)
+    - The relevant fields extracted from the dataset, with human-readable labels
+    - A normalised preview of the data
 
-## Next steps
+    Accept the plan to proceed, or enter a custom natural-language prompt and click **Regenerate** to have the LLM revise it. You can iterate as many times as you like before moving on.
 
-Now that you have your docs running, explore these key features:
+    <Note>
+      Every regeneration is a separate LLM call. Keep your prompt specific — for example, "focus only on the `title` and `body` fields and present them as a news site" — to get the best results quickly.
+    </Note>
+  </Step>
 
-<CardGroup cols={2}>
+  <Step title="Generate the project">
+    Click **Generate**. WebBuilder sends the approved plan to the LLM, which produces a complete Django project including:
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
+    - `models.py`, `views.py`, and `urls.py` tailored to your dataset
+    - HTML templates styled with Tailwind CSS
+    - A `load_data` management command that fetches and seeds the database from the original API
+    - A `Dockerfile` and `entrypoint.sh` for containerised deployment
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
+    Generation typically takes between 20 and 60 seconds depending on the model and dataset size.
+  </Step>
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
+  <Step title="Download the ZIP and run the site locally">
+    Click **Download ZIP** to save the generated project. Then run it locally:
 
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
+    ```bash
+    unzip mysite.zip
+    cd mysite
+    pip install -r requirements.txt
+    python manage.py migrate
+    python manage.py load_data
+    python manage.py runserver
+    ```
 
-</CardGroup>
+    Open `http://127.0.0.1:8000` to see the generated site.
 
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+    <Tip>
+      If the generated site includes user accounts, run `python manage.py seed_users` after `load_data` to create the default user fixtures.
+    </Tip>
+  </Step>
+</Steps>

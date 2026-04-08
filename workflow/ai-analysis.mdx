@@ -1,0 +1,88 @@
+---
+title: "AI analysis and plan"
+description: "How the LLM analyses your dataset, proposes a site plan, and how you can refine it."
+---
+
+After ingestion, WebBuilder runs a two-phase pipeline to understand your dataset and produce a site plan: a deterministic structural analysis in Python, followed by an LLM call that maps the data to a website concept.
+
+## Phase 1 — Structural analysis
+
+`build_analysis` in `utils/analysis/builder.py` inspects the parsed data without using any AI. It:
+
+1. **Detects the format** (`json` or `xml`) from the raw text.
+2. **Determines the root type** (`dict`, `list`, or other).
+3. **Finds the main collection** by walking the entire data tree and scoring each list it finds. The scoring algorithm in `utils/analysis/detection.py` rewards:
+   - Lists with many dict items (high "density").
+   - Items with consistent keys across the sample.
+   - Keys that look like content fields (`name`, `title`, `description`, etc.).
+   - It penalises deeply nested paths, metadata field names (`meta`, `links`, `status`), and sparse arrays.
+4. **Collects available keys** — the union of `sample_keys` (from the first item) and `top_keys` (sorted by frequency across all items), deduplicated.
+
+The result is a `main_collection_path` (e.g. `["results"]` or `["data", "items"]`) pointing to the best candidate list, plus a count of how many items it contains.
+
+## Phase 2 — LLM planning
+
+The LLM receives a focused, structured prompt containing:
+
+- **`available_keys`** — up to 50 field names from the dataset.
+- **`examples`** — up to 3 sample items, each with up to 20 fields, with values truncated to 220 characters.
+- **`main_collection_path`** — the path to the detected collection (context only, not a valid key).
+- **`user_prompt`** — your optional natural-language instruction.
+
+The LLM is instructed to return a single JSON object — no Markdown, no prose — conforming to this schema:
+
+```json
+{
+  "site_type": "blog | portfolio | catalog | dashboard | other",
+  "site_title": "A short descriptive name for the site",
+  "fields": [
+    { "key": "<exact key from available_keys>", "label": "Human-readable label" },
+    { "key": "...", "label": "..." }
+  ]
+}
+```
+
+`site_type` values and their typical datasets:
+
+| Value | Typical dataset |
+|-------|----------------|
+| `catalog` | Products, plants, books, any item list |
+| `blog` | Posts, articles, news with dates and long text |
+| `portfolio` | Projects, people, works |
+| `dashboard` | Metrics, statistics, time-series data |
+| `other` | Anything that does not fit the above |
+
+### Anti-hallucination validation
+
+Before the plan is saved, the backend validates every field:
+
+- Any `key` not present in `available_keys` is silently discarded.
+- Keys that look like data values (URLs, date strings, sentences) are rejected.
+- Reserved tokens (`main_collection_path`, `examples`, `fields`, etc.) are banned.
+- If no valid fields remain after validation, the plan falls back to the first 12 available keys.
+
+## Regeneration
+
+If the proposed plan does not match your intent, click **Regenerate** and optionally enter a more specific natural-language prompt. WebBuilder runs `generate_site_plan` again with your updated instruction and replaces the stored `field_mapping`.
+
+<Tip>
+The more specific your prompt, the better the result. Instead of "make a nice site", try "create a dark-themed plant catalogue with the common name as the title and the family as a category badge".
+</Tip>
+
+## Accepting the plan
+
+Once you are satisfied with the plan, click **Accept plan**. This sets `plan_accepted = True` on the `APIRequest` record and unlocks the site generation step. The generation button remains disabled until the plan is accepted.
+
+## Preview items
+
+After the plan is accepted, up to 3 normalised sample items from your dataset are displayed using the mapped field labels. This lets you verify that the field mapping makes sense before committing to a full generation.
+
+Each preview item is built by extracting the value for every `key` in `fields` from the raw dataset items, coercing all values to strings, and stripping whitespace.
+
+## LLM errors
+
+If the LLM call fails (network error, invalid JSON response, or a timeout), the `llm_error` string is shown in the UI. The `APIRequest` record — including the structural analysis — is preserved, so you can retry without re-fetching the URL.
+
+<Note>
+The planner makes up to 2 attempts (1 initial + 1 retry with an error hint) before falling back to a schema built from all available keys. A fallback plan always produces a valid site, though it may need manual tuning.
+</Note>

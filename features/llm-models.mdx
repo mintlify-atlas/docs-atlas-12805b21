@@ -1,0 +1,74 @@
+---
+title: "LLM models"
+description: "Choose from the built-in model catalog or configure your own OpenAI-compatible provider."
+---
+
+WebBuilder supports any LLM that implements the OpenAI `/chat/completions` format. The platform ships with a built-in catalog of free-tier models and lets you bring your own provider via the profile settings.
+
+## Built-in catalog
+
+| Model ID | Name | Provider | Best for |
+|---|---|---|---|
+| `meta-llama/llama-4-scout-17b-16e-instruct` | Llama 4 Scout | Groq | Fast code generation |
+| `meta-llama/llama-3.3-70b-instruct:free` | Llama 3.3 70B | OpenRouter | Complex sites |
+| `qwen/qwen3-coder:free` | Qwen3 Coder | OpenRouter | Clean HTML/CSS |
+
+<Tip>
+  Llama 4 Scout (Groq) is the fastest option for iteration. Llama 3.3 70B produces the most sophisticated multi-page sites when generation time is not a constraint.
+</Tip>
+
+## Model selection
+
+The model is selected from a dropdown in the assistant UI before you start a generation. The chosen model is used for **both** the API analysis phase and the full code generation phase.
+
+## Temperature settings
+
+WebBuilder uses different temperature values for each generation step to balance determinism and creativity:
+
+| Step | Temperature | Rationale |
+|---|---|---|
+| Models & views | `0.05` | Deterministic — structural code must be consistent |
+| Base template | `0.10` | Near-deterministic layout scaffold |
+| Page templates | `0.40` | More creative — allows varied UI patterns per page |
+
+## Custom model
+
+You can replace the catalog with any OpenAI-compatible endpoint.
+
+<Steps>
+  <Step title="Open your profile">
+    Navigate to **Profile** (`/perfil`).
+  </Step>
+  <Step title="Fill in your provider details">
+    Provide the following:
+    - **Custom LLM base URL** — e.g. `https://api.groq.com/openai/v1`
+    - **Model name** — e.g. `mistralai/mistral-7b-instruct`
+    - **API key** — stored encrypted in the database
+  </Step>
+  <Step title="Select the custom model">
+    In the assistant dropdown, choose **Custom model**. WebBuilder will route all requests to your configured endpoint.
+  </Step>
+</Steps>
+
+## Compatible providers
+
+<CardGroup cols={2}>
+  <Card title="OpenRouter" icon="globe">
+    Access hundreds of models through a single endpoint at `https://openrouter.ai/api/v1`.
+  </Card>
+  <Card title="Groq" icon="bolt">
+    High-speed inference at `https://api.groq.com/openai/v1`. Used by Llama 4 Scout in the built-in catalog.
+  </Card>
+  <Card title="Ollama" icon="server">
+    Run models locally. Point the base URL to your Ollama instance (e.g. `http://localhost:11434/v1`).
+  </Card>
+  <Card title="Any OpenAI-compatible endpoint" icon="plug">
+    Any provider that implements `POST /chat/completions` with the OpenAI request/response shape works.
+  </Card>
+</CardGroup>
+
+## Cost
+
+<Note>
+  All three catalog models have free-tier options. They use the server-side `LLM_API_KEY` configured in `.env` — individual users do not need their own key. Custom models use the API key entered in the user's profile and are billed by the chosen provider.
+</Note>

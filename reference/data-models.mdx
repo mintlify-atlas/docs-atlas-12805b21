@@ -1,0 +1,109 @@
+---
+title: "Data models"
+description: "The Django models that power WebBuilder's storage layer."
+---
+
+WebBuilder's database layer is defined in `WebBuilder/models.py`. Six models cover the full lifecycle from API submission through site generation, deployment, versioning, and user management.
+
+## APIRequest
+
+Represents a single API analysis submitted by a user. Created when a user submits a URL or uploads a file, and updated as the analysis pipeline runs.
+
+| Field | Type | Description |
+|---|---|---|
+| `user` | `ForeignKey(User)` | The account that owns this analysis. Deleted with the user (`CASCADE`). |
+| `api_url` | `URLField` | The URL that was submitted for analysis. |
+| `input_type` | `CharField` | Source of the data: `url` (HTTP fetch) or `file` (upload). |
+| `date` | `DateTimeField` | Timestamp set automatically when the record is created (`auto_now_add`). |
+| `raw_data` | `TextField` | The original raw response text before parsing. |
+| `parsed_data` | `JSONField` | The parsed Python `dict` or `list` extracted from the raw data. |
+| `status` | `CharField` | Analysis state: `pending`, `processed`, or `error`. |
+| `response_summary` | `TextField` | Human-readable summary of the fetch and parse result. |
+| `error_message` | `TextField` | Error details populated when `status = error`. |
+| `field_mapping` | `JSONField` | The LLM-generated plan: `{"site_type": "...", "site_title": "...", "fields": [{"key": "...", "label": "..."}]}`. |
+| `plan_accepted` | `BooleanField` | Set to `true` once the user clicks "Accept plan" in the wizard. Defaults to `false`. |
+
+<Note>
+  `field_mapping` is the output of `generate_site_plan()` in `planner.py`. Every `key` in the `fields` array is validated against the actual keys present in the dataset before being saved.
+</Note>
+
+## GeneratedSite
+
+Created when a user accepts a plan. Tracks the full generation and deployment lifecycle for one site.
+
+| Field | Type | Description |
+|---|---|---|
+| `project_source` | `OneToOneField(APIRequest)` | The analysis this site was generated from. |
+| `public_id` | `UUIDField` | Stable, non-guessable public identifier (auto-generated UUID4). |
+| `accepted_plan` | `JSONField` | Snapshot of the plan at the moment generation was triggered, including `_meta.sample_items` and `_meta.main_collection_path`. |
+| `project_files` | `JSONField` | Dictionary of `{relative_path: file_content}` for the entire generated project. |
+| `project_name` | `SlugField` | Django project slug derived from `site_title`. |
+| `preview_url` | `URLField` | The live preview URL, set by n8n after a successful deployment. |
+| `generation_status` | `CharField` | Code generation state: `pending`, `generating`, `ready`, or `error`. |
+| `generation_error` | `TextField` | Error message if `generation_status = error`. |
+| `deploy_status` | `CharField` | Deployment state: `idle`, `deploying`, `done`, or `error`. |
+| `deploy_error` | `TextField` | Error message if `deploy_status = error`. |
+| `created_at` | `DateTimeField` | Creation timestamp (auto-set). |
+| `updated_at` | `DateTimeField` | Last-modified timestamp (auto-updated). |
+
+<Info>
+  `project_files` is populated by `generate_project_files()` in `project_generator.py` and contains every file needed to run the generated Django app, including `Dockerfile`, `requirements.txt`, and all templates.
+</Info>
+
+## GenerationLog
+
+One record per LLM call during site generation. Used for debugging, auditing, and displaying generation history in the admin.
+
+| Field | Type | Description |
+|---|---|---|
+| `site` | `ForeignKey(GeneratedSite)` | The site this log entry belongs to. |
+| `step` | `CharField` | Name of the generation step, e.g. `models`, `views`, `template_home`, `views_retry`. |
+| `llm_model` | `CharField` | The model identifier used, e.g. `llama-3.3-70b-instruct:free`. |
+| `system_prompt` | `TextField` | The system prompt sent to the LLM. |
+| `user_prompt` | `TextField` | The user prompt sent to the LLM. |
+| `raw_output` | `TextField` | The raw text returned by the LLM before any post-processing. |
+| `consistency_errors` | `JSONField` | List of error strings detected by `check_consistency()` for this step. Defaults to `[]`. |
+| `had_retry` | `BooleanField` | `true` if this step was regenerated due to consistency errors. |
+| `created_at` | `DateTimeField` | Timestamp of the LLM call. |
+
+## SiteVersion
+
+A full snapshot of `project_files` at a point in time. Created automatically before any regeneration or version restore, enabling rollback.
+
+| Field | Type | Description |
+|---|---|---|
+| `site` | `ForeignKey(GeneratedSite)` | The site this version belongs to. |
+| `version_number` | `PositiveIntegerField` | Monotonically increasing version counter. Ordered descending (most recent first). |
+| `project_files` | `JSONField` | Complete file dictionary snapshot at this version. |
+| `label` | `CharField` | Auto-generated description for this version (e.g. "Antes de regenerar", "Antes de restaurar"). |
+| `created_at` | `DateTimeField` | When this version was created. |
+
+## SiteUser
+
+Credentials for users that will be seeded into the generated Django site at deploy time via the `seed_users` management command.
+
+| Field | Type | Description |
+|---|---|---|
+| `site` | `ForeignKey(GeneratedSite)` | The site these credentials belong to. |
+| `username` | `CharField` | Username for the generated site. |
+| `password` | `CharField` | Plain-text password stored here, hashed when `seed_users` runs. |
+| `role` | `CharField` | `super` (creates a superuser via `create_superuser`) or `normal` (creates a regular user). |
+
+<Warning>
+  `(site, username)` is enforced as `unique_together`. You cannot add duplicate usernames within the same project.
+</Warning>
+
+## UserProfile
+
+Extends Django's built-in `User` model with optional custom LLM settings. Created automatically via a signal when a user registers.
+
+| Field | Type | Description |
+|---|---|---|
+| `user` | `OneToOneField(User)` | The Django auth user this profile belongs to. |
+| `custom_llm_base_url` | `URLField` | Base URL for a custom OpenAI-compatible LLM endpoint. Leave blank to use the platform default. |
+| `custom_llm_model` | `CharField` | Model identifier to use with the custom endpoint, e.g. `gpt-4o`. |
+| `custom_llm_api_key` | `EncryptedCharField` | API key for the custom endpoint. Stored encrypted at rest using `django-encrypted-model-fields`. |
+
+<Tip>
+  If `custom_llm_base_url` and `custom_llm_model` are both set, all LLM calls for that user's generations will be routed to their custom endpoint instead of the platform default.
+</Tip>

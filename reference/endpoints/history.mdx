@@ -1,0 +1,172 @@
+---
+title: "History endpoints"
+description: "Endpoints for browsing analysis history and generated sites."
+---
+
+All history endpoints require an active session. Users who are not authenticated are redirected to `/login`.
+
+<Note>
+  `/historial` is a redirect shortcut. All history browsing is handled by the `/historial/analisis` and `/historial/sitios` views.
+</Note>
+
+---
+
+## GET /historial
+
+Redirects to `/historial/analisis`.
+
+---
+
+## GET /historial/analisis
+
+Returns a paginated list of `APIRequest` records belonging to the authenticated user, ordered by date descending.
+
+### Query parameters
+
+<ParamField query="status" type="string">
+  Filter by analysis status. Accepted values: `pending`, `processed`, `error`. Any other value is ignored and all records are returned.
+</ParamField>
+
+<ParamField query="q" type="string">
+  Case-insensitive substring search against `api_url`.
+</ParamField>
+
+<ParamField query="page" type="integer" default="1">
+  Page number. Each page contains 10 records.
+</ParamField>
+
+### Response
+
+Returns the `WebBuilder/partials/history/recent_analysis.html` template with:
+
+- `api_requests` — paginated queryset of `APIRequest` instances
+- `status_filter` — the active status filter value
+- `search` — the active search query
+- `total_count` — total number of matching records
+- `total_sites` — total number of `GeneratedSite` records for the current user
+
+---
+
+## GET /historial/sitios
+
+Returns a paginated list of `GeneratedSite` records associated with the authenticated user, ordered by creation date descending.
+
+### Query parameters
+
+<ParamField query="q" type="string">
+  Case-insensitive substring search against `accepted_plan__site_title`.
+</ParamField>
+
+<ParamField query="page" type="integer" default="1">
+  Page number. Each page contains 10 records.
+</ParamField>
+
+### Response
+
+Returns the `WebBuilder/partials/history/published_sites.html` template with:
+
+- `generated_sites` — paginated queryset of `GeneratedSite` instances with `project_source` select-related
+- `search` — the active search query
+- `total_count` — total number of matching records
+- `total_analysis` — total number of `APIRequest` records for the current user
+
+---
+
+## POST /historial/eliminar/\<api_request_id\>
+
+Deletes an `APIRequest` and all of its dependants via cascade, including the associated `GeneratedSite` and any `SiteVersion` snapshots.
+
+### Path parameters
+
+<ParamField path="api_request_id" type="integer" required>
+  ID of the `APIRequest` to delete. Must belong to the authenticated user.
+</ParamField>
+
+### Response
+
+Redirects to `/historial/analisis` on success.
+
+<Warning>
+  Deletion is permanent and cascades to the related `GeneratedSite` and all `SiteVersion` records. There is no confirmation step at the endpoint level; any confirmation UI must be implemented in the client.
+</Warning>
+
+Non-POST requests are redirected to `/historial/analisis` without performing any deletion.
+
+---
+
+## POST /historial/sitios/eliminar/\<site_id\>
+
+Deletes only the `GeneratedSite` record. The parent `APIRequest` and its analysis data are preserved.
+
+### Path parameters
+
+<ParamField path="site_id" type="integer" required>
+  ID of the `GeneratedSite` to delete. Must be associated with the authenticated user via `project_source__user`.
+</ParamField>
+
+### Response
+
+Redirects to `/historial/sitios` on success.
+
+<Warning>
+  All `SiteVersion` snapshots and `SiteUser` records attached to this `GeneratedSite` are deleted along with it.
+</Warning>
+
+Non-POST requests are redirected to `/historial/sitios` without performing any deletion.
+
+---
+
+## GET /metricas/
+
+Renders an admin-only metrics dashboard with aggregate usage statistics across all users.
+
+<Warning>
+  This endpoint is restricted to Django staff users (`is_staff=True`). Non-staff users are redirected to `/login`.
+</Warning>
+
+### Response
+
+Returns the `WebBuilder/metrics.html` template. The template context includes the following data:
+
+**KPIs**
+
+- `total_users` — total registered users
+- `total_analyses` — total `APIRequest` records
+- `total_sites` — total `GeneratedSite` records
+- `total_logs` — total `GenerationLog` records
+- `success_rate` — percentage of analyses with `status="processed"`
+- `conversion_rate` — percentage of analyses that reached `plan_accepted=True`
+- `retry_rate` — percentage of generation logs that had a retry
+
+**User activity**
+
+- `active_users` — users with at least one analysis in the last 7 days
+- `users_with_sites` — users who have at least one generated site
+- `top_users_analyses` — top 5 users by analysis count
+- `top_users_sites` — top 5 users by generated site count
+
+**30-day activity charts**
+
+- `chart_labels` — JSON array of date labels (`"D Mon"` format) for the last 30 days
+- `chart_analyses` — JSON array of daily analysis counts
+- `chart_sites` — JSON array of daily site generation counts
+- `json_count` — analyses submitted via URL (`input_type="url"`)
+- `file_count` — analyses submitted via file upload (`input_type="file"`)
+
+**LLM statistics**
+
+- `consistency_errors_total` — generation logs with non-empty `consistency_errors`
+- `consistency_rate` — percentage of logs with consistency errors
+- `avg_calls_per_site` — average LLM calls per generated site
+- `model_stats` — per-model breakdown with `total`, `retries`, `retry_rate`, and `bar_pct`
+- `error_steps` — top 6 generation steps by consistency error count, with `bar_pct`
+- `steps_stats` — per-step breakdown with `total` and `retries`
+
+**Recent activity and alerts**
+
+- `recent_sites` — 10 most recently created sites
+- `all_sites` — 50 most recently created sites
+- `stuck_generating` — sites with `generation_status="generating"` for more than 15 minutes
+- `pending_analyses` — count of analyses with `status="pending"`
+- `oldest_pending` — the oldest pending `APIRequest`, or `None`
+- `recent_errors` — up to 5 sites with `generation_status="error"` in the last 24 hours

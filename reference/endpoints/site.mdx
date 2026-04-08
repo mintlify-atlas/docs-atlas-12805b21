@@ -1,0 +1,352 @@
+---
+title: "Site endpoints"
+description: "Endpoints for generating, downloading, deploying, and managing generated sites."
+---
+
+All site endpoints require an active session. Users who are not authenticated are redirected to `/login`.
+
+<Note>
+  Generation and deployment are asynchronous. Both operations run in background threads. Use the polling endpoints (`/status/` and `/deploy-status/`) to track progress after triggering them.
+</Note>
+
+---
+
+## GET /site/\<api_request_id\>
+
+Renders the site dashboard. Displays generation status, the file tree of `project_files`, deployment controls, version history, and the site user list.
+
+### Path parameters
+
+<ParamField path="api_request_id" type="integer" required>
+  ID of the `APIRequest` that is the source for this site.
+</ParamField>
+
+### Response
+
+Returns the `WebBuilder/site_render.html` template with:
+
+- `api_request` — the `APIRequest` model instance
+- `site` — the associated `GeneratedSite` instance
+- `site_users` — queryset of `SiteUser` records for this site
+
+---
+
+## POST /site/\<api_request_id\>/generate/
+
+Triggers asynchronous site generation. If `project_files` already exist, the current state is automatically saved as a new `SiteVersion` snapshot (labelled "Antes de regenerar") before generation begins.
+
+Sets `generation_status` to `"generating"` immediately, then starts a background thread. Redirects to the site dashboard without waiting for generation to complete.
+
+### Path parameters
+
+<ParamField path="api_request_id" type="integer" required>
+  ID of the `APIRequest` source.
+</ParamField>
+
+### Response
+
+Redirects to `GET /site/<api_request_id>`.
+
+<Warning>
+  Only POST requests are accepted. A GET to this URL redirects to the site dashboard without triggering generation.
+</Warning>
+
+---
+
+## GET /site/\<api_request_id\>/status/
+
+Polling endpoint that returns the current generation status as JSON. The frontend calls this every few seconds while `status` is `"generating"`.
+
+### Path parameters
+
+<ParamField path="api_request_id" type="integer" required>
+  ID of the `APIRequest` source.
+</ParamField>
+
+### Response
+
+```json
+{
+  "status": "generating",
+  "error": "",
+  "files_count": 0
+}
+```
+
+<ResponseField name="status" type="string" required>
+  Current generation state. One of `pending`, `generating`, `ready`, or `error`.
+</ResponseField>
+
+<ResponseField name="error" type="string" required>
+  Error message if `status` is `"error"`, otherwise an empty string.
+</ResponseField>
+
+<ResponseField name="files_count" type="integer" required>
+  Number of files in `project_files`. Zero while generating.
+</ResponseField>
+
+---
+
+## GET /site/\<api_request_id\>/download/
+
+Downloads all `project_files` as a ZIP archive.
+
+### Path parameters
+
+<ParamField path="api_request_id" type="integer" required>
+  ID of the `APIRequest` source.
+</ParamField>
+
+### Response
+
+Returns a `application/zip` stream. The `Content-Disposition` header sets the filename to `<project_name>.zip`.
+
+If no files have been generated yet, redirects to the site dashboard with an error message instead of streaming a file.
+
+---
+
+## POST /site/\<api_request_id\>/deploy/
+
+Triggers asynchronous n8n deployment. The site must have `generation_status == "ready"` and non-empty `project_files`. Sets `deploy_status` to `"deploying"` and starts a background thread, then redirects immediately.
+
+### Path parameters
+
+<ParamField path="api_request_id" type="integer" required>
+  ID of the `APIRequest` source.
+</ParamField>
+
+### Response
+
+Redirects to `GET /site/<api_request_id>`.
+
+<Info>
+  The background thread builds a ZIP, writes it to the shared `N8N_LOCAL_FILES_PATH` directory, then POSTs to `N8N_DEPLOY_WEBHOOK` and waits up to 180 seconds for a response containing `preview_url`.
+</Info>
+
+<Warning>
+  If the site is not in `"ready"` state, or `project_files` is empty, deployment is rejected with an error message and the user is redirected to the site dashboard without starting the thread.
+</Warning>
+
+---
+
+## GET /site/\<api_request_id\>/deploy-status/
+
+Polling endpoint that returns the current deployment status as JSON.
+
+### Path parameters
+
+<ParamField path="api_request_id" type="integer" required>
+  ID of the `APIRequest` source.
+</ParamField>
+
+### Response
+
+```json
+{
+  "deploy_status": "done",
+  "deploy_error": "",
+  "preview_url": "http://localhost:8001"
+}
+```
+
+<ResponseField name="deploy_status" type="string" required>
+  One of `deploying`, `done`, or `error`.
+</ResponseField>
+
+<ResponseField name="deploy_error" type="string" required>
+  Error description if `deploy_status` is `"error"`, otherwise an empty string.
+</ResponseField>
+
+<ResponseField name="preview_url" type="string" required>
+  URL of the deployed site, populated once `deploy_status` is `"done"`.
+</ResponseField>
+
+---
+
+## POST /site/\<api_request_id\>/update-file/
+
+Replaces the content of a single file in `project_files` in place. The path must already exist in the project; new files cannot be created through this endpoint.
+
+### Path parameters
+
+<ParamField path="api_request_id" type="integer" required>
+  ID of the `APIRequest` source.
+</ParamField>
+
+### Request body (JSON)
+
+```json
+{
+  "path": "mysite/siteapp/views.py",
+  "content": "..."
+}
+```
+
+<ParamField body="path" type="string" required>
+  Relative path of the file to update, as it appears in `project_files` keys.
+</ParamField>
+
+<ParamField body="content" type="string" required>
+  New file content to write.
+</ParamField>
+
+### Response
+
+```json
+{ "ok": true }
+```
+
+Returns HTTP 404 with `{"ok": false, "error": "Ruta no encontrada"}` if the path does not exist in `project_files`. Returns HTTP 400 if the request body is not valid JSON or `path` is empty.
+
+<ResponseField name="ok" type="boolean" required>
+  `true` on success, `false` on any error.
+</ResponseField>
+
+<ResponseField name="error" type="string">
+  Present only when `ok` is `false`. Describes what went wrong.
+</ResponseField>
+
+---
+
+## GET /site/\<api_request_id\>/versions/
+
+Returns a JSON list of all `SiteVersion` snapshots for this site, ordered by version number descending.
+
+### Path parameters
+
+<ParamField path="api_request_id" type="integer" required>
+  ID of the `APIRequest` source.
+</ParamField>
+
+### Response
+
+```json
+{
+  "versions": [
+    {
+      "id": 3,
+      "version_number": 3,
+      "label": "Antes de regenerar",
+      "created_at": "08/04/2026 14:30"
+    }
+  ]
+}
+```
+
+<ResponseField name="versions" type="object[]" required>
+  <Expandable title="version object">
+    <ResponseField name="id" type="integer" required>
+      Primary key of the `SiteVersion` record.
+    </ResponseField>
+    <ResponseField name="version_number" type="integer" required>
+      Sequential version number within this site.
+    </ResponseField>
+    <ResponseField name="label" type="string" required>
+      Human-readable label for the snapshot.
+    </ResponseField>
+    <ResponseField name="created_at" type="string" required>
+      Creation timestamp formatted as `DD/MM/YYYY HH:MM`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+## POST /site/\<api_request_id\>/versions/\<version_id\>/restore/
+
+Restores a version snapshot. Before restoring, the current `project_files` are automatically saved as a new snapshot (labelled "Antes de restaurar"). After restoring, `generation_status` is set to `"ready"`.
+
+### Path parameters
+
+<ParamField path="api_request_id" type="integer" required>
+  ID of the `APIRequest` source.
+</ParamField>
+
+<ParamField path="version_id" type="integer" required>
+  ID of the `SiteVersion` to restore.
+</ParamField>
+
+### Response
+
+```json
+{ "ok": true }
+```
+
+<ResponseField name="ok" type="boolean" required>
+  `true` when the restore succeeds.
+</ResponseField>
+
+---
+
+## GET /site/\<api_request_id\>/versions/\<version_id\>/download/
+
+Downloads a specific version snapshot as a ZIP archive.
+
+### Path parameters
+
+<ParamField path="api_request_id" type="integer" required>
+  ID of the `APIRequest` source.
+</ParamField>
+
+<ParamField path="version_id" type="integer" required>
+  ID of the `SiteVersion` to download.
+</ParamField>
+
+### Response
+
+Returns an `application/zip` stream. The filename is `<project_name>_v<version_number>.zip`.
+
+---
+
+## POST /site/\<api_request_id\>/users/save/
+
+Replaces all `SiteUser` records for this site with the provided list. All existing users are deleted before the new ones are inserted.
+
+### Path parameters
+
+<ParamField path="api_request_id" type="integer" required>
+  ID of the `APIRequest` source.
+</ParamField>
+
+### Request body (JSON)
+
+```json
+{
+  "users": [
+    { "username": "admin", "password": "secret", "role": "super" },
+    { "username": "viewer", "password": "pass", "role": "normal" }
+  ]
+}
+```
+
+<ParamField body="users" type="object[]" required>
+  List of user objects. Pass an empty array to remove all users.
+
+  <Expandable title="user object">
+    <ParamField body="username" type="string" required>
+      Username for the generated site user.
+    </ParamField>
+    <ParamField body="password" type="string" required>
+      Plain-text password for the generated site user.
+    </ParamField>
+    <ParamField body="role" type="string" default="normal">
+      Access role. `"super"` grants elevated permissions; `"normal"` is the default.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+### Response
+
+```json
+{ "ok": true, "saved": 2 }
+```
+
+<ResponseField name="ok" type="boolean" required>
+  `true` when the operation succeeds.
+</ResponseField>
+
+<ResponseField name="saved" type="integer" required>
+  Number of `SiteUser` records written.
+</ResponseField>
+
+Returns HTTP 400 with `{"ok": false, "error": "..."}` if the request body is not valid JSON, or if any user entry has an empty `username` or `password`.

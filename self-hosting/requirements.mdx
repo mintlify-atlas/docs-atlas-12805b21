@@ -1,0 +1,60 @@
+---
+title: "Requirements"
+description: "System requirements and dependencies for running WebBuilder."
+---
+
+## Runtime
+
+| Requirement | Version |
+|---|---|
+| Python | 3.11+ |
+| Django | 5.1.7 |
+| Database | SQLite (default) or any Django-supported database |
+
+<Note>
+  WebBuilder uses SQLite by default — no database server is required for development or basic self-hosted deployments. The database file (`db.sqlite3`) is created automatically on first migration.
+</Note>
+
+## Python dependencies
+
+These packages are required and must be installed alongside Django:
+
+| Package | Purpose |
+|---|---|
+| `requests` | HTTP client for fetching data from public APIs |
+| `xmltodict` | Converts XML API responses to Python dictionaries |
+| `defusedxml` | Safe XML parsing that prevents XXE (XML External Entity) attacks |
+| `django-encrypted-model-fields` | Encrypts user-supplied API keys at rest in the database |
+| `python-dotenv` | Loads environment variables from `.env` into `manage.py` |
+
+## LLM provider
+
+You need at least one API key for a provider that implements the OpenAI `/chat/completions` format:
+
+- [OpenRouter](https://openrouter.ai) — aggregator with access to many models, including free-tier options
+- [Groq](https://groq.com) — fast inference for open models like Llama 3
+- Any other OpenAI-compatible provider
+
+<Tip>
+  The default model in `.env.example` (`liquid/lfm-2.5-1.2b-instruct:free`) is a free OpenRouter model, so you can get started without a paid API plan.
+</Tip>
+
+## Optional: n8n
+
+[n8n](https://n8n.io) is used for automation workflows — sending welcome emails on registration and login notifications. It is not required to run WebBuilder; the platform works without it. The webhook variables simply go unused if n8n is not configured.
+
+If you do want automation:
+
+- A running n8n instance (self-hosted or cloud)
+- A shared filesystem path accessible to both WebBuilder and n8n (for the ZIP-based deployment feature)
+- Docker (only needed for the generated site deployment workflow, not for WebBuilder itself)
+
+## Development environment
+
+A Python virtual environment is strongly recommended to avoid dependency conflicts:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```

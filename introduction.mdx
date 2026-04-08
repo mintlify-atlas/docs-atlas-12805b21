@@ -1,0 +1,62 @@
+---
+title: "WebBuilder"
+description: "Turn any public JSON or XML API into a complete, deployable Django website — powered by AI."
+---
+
+WebBuilder is a Django-based platform that analyses any public API, proposes a site architecture using an LLM, and generates a fully working Django project you can download and run immediately. No templates to pick, no boilerplate to write — the AI does the heavy lifting while you stay in control at every step.
+
+<CardGroup cols={2}>
+  <Card title="Quick start" icon="rocket" href="/quickstart">
+    Register, connect an API, and download your first generated site in minutes.
+  </Card>
+  <Card title="Core workflow" icon="arrows-spin" href="/workflow/api-ingestion">
+    Understand the four-step pipeline from API URL to deployable ZIP.
+  </Card>
+  <Card title="LLM models" icon="brain" href="/features/llm-models">
+    Choose from the built-in model catalog or bring your own OpenAI-compatible provider.
+  </Card>
+  <Card title="Self-hosting" icon="server" href="/self-hosting/requirements">
+    Run WebBuilder on your own infrastructure with Docker.
+  </Card>
+</CardGroup>
+
+## How it works
+
+<Steps>
+  <Step title="Submit an API URL">
+    Paste any public URL that returns JSON or XML. WebBuilder fetches the data, detects the format, and safely parses it.
+  </Step>
+  <Step title="Review the AI plan">
+    The LLM analyses the dataset structure and proposes a site type (blog, catalogue, portfolio, dashboard…), relevant fields, and human-readable labels. You can accept the plan or regenerate it with a custom prompt.
+  </Step>
+  <Step title="Generate the project">
+    Once you accept the plan, WebBuilder generates a complete Django project: models, views, HTML templates with Tailwind CSS, a data-loading management command, and a Dockerfile.
+  </Step>
+  <Step title="Download and deploy">
+    Download the project as a ZIP and run it locally, or trigger a one-click deployment via the built-in n8n integration.
+  </Step>
+</Steps>
+
+## Key features
+
+- **JSON and XML support** — automatic format detection and safe parsing via `defusedxml` + `xmltodict`
+- **Multi-model LLM catalog** — Llama 4 Scout (Groq), Llama 3.3 70B and Qwen3 Coder (OpenRouter), or any custom OpenAI-compatible endpoint
+- **Iterative plan refinement** — regenerate the AI plan as many times as you like with a natural-language prompt
+- **In-browser file editor** — tweak any generated source file before downloading
+- **Version history** — every regeneration creates a snapshot you can restore or download at any time
+- **n8n automation** — welcome emails and login notifications out of the box
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/configuration">
+    Set up your LLM credentials and n8n webhooks.
+  </Card>
+  <Card title="API endpoints reference" icon="code" href="/reference/endpoints/assistant">
+    Explore every HTTP endpoint exposed by the platform.
+  </Card>
+  <Card title="n8n integration" icon="plug" href="/integrations/n8n-automation">
+    Connect email notifications and deployment workflows.
+  </Card>
+  <Card title="Architecture" icon="diagram-project" href="/reference/data-models">
+    Understand the data models powering WebBuilder.
+  </Card>
+</CardGroup>

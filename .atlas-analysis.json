@@ -1,0 +1,105 @@
+{
+  "projectType": "saas",
+  "projectName": "WebBuilder",
+  "projectDescription": "A Django-based platform that converts any public JSON or XML API into a fully generated, deployable Django website using AI-driven analysis, field mapping, and code generation.",
+  "theme": "luma",
+  "primaryColor": "#6366f1",
+  "lightColor": "#eef2ff",
+  "darkColor": "#312e81",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "configuration"
+            ]
+          },
+          {
+            "group": "Core Workflow",
+            "pages": [
+              "workflow/api-ingestion",
+              "workflow/ai-analysis",
+              "workflow/site-generation",
+              "workflow/deployment"
+            ]
+          },
+          {
+            "group": "Features",
+            "pages": [
+              "features/llm-models",
+              "features/version-control",
+              "features/user-management",
+              "features/history"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": [
+              "integrations/n8n-automation",
+              "integrations/llm-providers"
+            ]
+          },
+          {
+            "group": "Self-Hosting",
+            "pages": [
+              "self-hosting/requirements",
+              "self-hosting/docker",
+              "self-hosting/environment-variables"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Reference",
+        "groups": [
+          {
+            "group": "Architecture",
+            "pages": [
+              "reference/data-models",
+              "reference/project-structure",
+              "reference/prompt-engineering"
+            ]
+          },
+          {
+            "group": "API Endpoints",
+            "pages": [
+              "reference/endpoints/assistant",
+              "reference/endpoints/site",
+              "reference/endpoints/history"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "AI-powered API analysis: feeds JSON/XML datasets to an LLM that proposes site type, relevant fields, and a structured plan",
+    "Step-by-step generation wizard: user reviews and accepts (or regenerates) the LLM plan before code is produced",
+    "Full Django project generation: produces models.py, views.py, templates, management commands, Dockerfile, and entrypoint in one pass",
+    "Multi-LLM catalog support: swap between Llama 4 Scout (Groq), Llama 3.3 70B, Qwen3 Coder (OpenRouter), or a custom OpenAI-compatible provider",
+    "Version control for generated sites: snapshot before every regeneration, browse history, restore or download any past version",
+    "n8n automation integration: welcome email on registration and login notification via configurable webhooks",
+    "Secure XML/JSON parsing: uses defusedxml + xmltodict for safe XML ingestion",
+    "In-browser file editor: modify any generated source file directly from the dashboard before downloading or deploying"
+  ],
+  "publicApiSurface": [
+    "GET/POST /asistente — Main assistant wizard (URL submission, LLM plan review, plan acceptance)",
+    "POST /site/<id>/generate/ — Trigger async Django project generation",
+    "GET /site/<id>/status/ — Poll generation status (returns JSON)",
+    "GET /site/<id>/download/ — Download generated project as ZIP",
+    "POST /site/<id>/deploy/ — Deploy project via n8n webhook",
+    "GET /site/<id>/deploy-status/ — Poll deployment status (returns JSON)",
+    "POST /site/<id>/update-file/ — Edit a single generated file in-place",
+    "GET /site/<id>/versions/ — List project version snapshots",
+    "POST /site/<id>/versions/<vid>/restore/ — Restore a previous version",
+    "GET /site/<id>/versions/<vid>/download/ — Download a specific version as ZIP",
+    "POST /site/<id>/users/save/ — Save site user credentials",
+    "GET /historial — View analysis history",
+    "GET /metricas/ — Usage metrics dashboard"
+  ]
+}

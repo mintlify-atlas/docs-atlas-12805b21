@@ -1,0 +1,54 @@
+---
+title: "Configuration"
+description: "Set up your LLM credentials, custom model, and automation webhooks."
+---
+
+All server-level configuration is read from environment variables at startup. Copy `.env.example` to `.env` in the project root and fill in your values before running Django.
+
+```bash
+cp .env.example .env
+```
+
+## LLM credentials
+
+The three variables below control which LLM provider and model the server uses by default for every analysis and generation request.
+
+```env
+LLM_BASE_URL=https://openrouter.ai/api/v1
+LLM_API_KEY=KEY_HERE
+LLM_MODEL=liquid/lfm-2.5-1.2b-instruct:free
+```
+
+## Environment variables
+
+| Variable | Description | Default (if unset) |
+|---|---|---|
+| `LLM_BASE_URL` | Base URL of the OpenAI-compatible LLM provider | `https://openrouter.ai/api/v1` |
+| `LLM_API_KEY` | API key for the LLM provider | _(empty)_ |
+| `LLM_MODEL` | Model identifier sent in every `/chat/completions` request | `meta-llama/llama-3.3-70b-instruct:free` |
+| `SECRET_KEY` | Django secret key used for cryptographic signing | _(empty — must be set in production)_ |
+| `FIELD_ENCRYPTION_KEY` | Fernet key used to encrypt user-supplied LLM API keys at rest | _(empty)_ |
+| `N8N_WEBHOOK_REGISTRO` | n8n webhook URL triggered on new user registration | `http://localhost:5678/webhook/WebBuilder-Register` |
+| `N8N_WEBHOOK_LOGIN` | n8n webhook URL triggered on every successful login | `http://localhost:5678/webhook/WebBuilder-Login` |
+| `N8N_DEPLOY_WEBHOOK` | n8n webhook URL that handles one-click deployment requests | `http://localhost:5678/webhook/webbuilder-deploy` |
+| `N8N_LOCAL_FILES_PATH` | Local file system path that n8n reads generated ZIPs from | `/home/alejandro/Desktop/TFG/docker/n8n/local-files` |
+
+<Warning>
+  Never commit `SECRET_KEY` or `LLM_API_KEY` to version control. Add `.env` to your `.gitignore` before your first commit.
+</Warning>
+
+## Custom LLM per user
+
+Every user can override the server defaults with their own LLM provider by visiting `/perfil`. The profile form exposes three fields:
+
+| Field | Description |
+|---|---|
+| Base URL | The `/v1`-style base URL of the user's preferred provider (e.g. `https://api.openai.com/v1`) |
+| Model name | The model identifier, e.g. `gpt-4o` or `llama-3.3-70b-versatile` |
+| API key | The user's personal API key for that provider |
+
+When all three fields are set, every analysis and generation request for that user uses their personal LLM configuration instead of the server defaults. The API key is stored encrypted in the database using the `FIELD_ENCRYPTION_KEY` Fernet key, so you must set `FIELD_ENCRYPTION_KEY` before any user saves a personal API key.
+
+<Note>
+  WebBuilder uses the standard OpenAI `/chat/completions` interface, so any compatible provider works: [OpenRouter](https://openrouter.ai), [Groq](https://groq.com), a local [Ollama](https://ollama.com) instance, or any other endpoint that follows the same format. Only the three variables above need to change.
+</Note>

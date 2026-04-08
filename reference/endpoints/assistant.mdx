@@ -1,0 +1,109 @@
+---
+title: "Assistant endpoints"
+description: "Endpoints for submitting APIs, reviewing AI plans, and triggering site creation."
+---
+
+All assistant endpoints require an active session. Users who are not authenticated are redirected to `/login`.
+
+<Note>
+  WebBuilder is a server-side Django application. These endpoints return HTML pages or perform redirects, not JSON responses, unless noted otherwise.
+</Note>
+
+---
+
+## GET /asistente
+
+Renders the analysis wizard. When called without parameters it shows an empty form. When `api_request_id` is provided it reloads an existing analysis from the database, reconstructing the parsed data and LLM field mapping into the form.
+
+### Query parameters
+
+<ParamField query="api_request_id" type="integer">
+  ID of an existing `APIRequest` record to reload. If the record does not belong to the authenticated user, an error message is shown and the empty form is rendered.
+</ParamField>
+
+### Response
+
+Returns the `WebBuilder/assistant.html` template. When `api_request_id` is valid, the template receives:
+
+- `api_request` — the loaded `APIRequest` model instance
+- `analysis` — the reconstructed structure analysis (main collection path, available keys)
+- `llm_plan` — the stored `field_mapping` dict (`site_type`, `site_title`, `fields`)
+- `llm_plan_text` — the same plan serialised as indented JSON for display
+- `llm_catalog` — list of available LLM models
+
+---
+
+## POST /asistente
+
+Processes a form submission. Behaviour depends on the `action` field.
+
+### Form fields
+
+<ParamField body="action" type="string" default="analyze">
+  Controls which operation runs. One of `analyze`, `regenerate`, or `accept_plan`.
+</ParamField>
+
+<ParamField body="api_url" type="string">
+  Publicly accessible URL returning JSON or XML. Required when `action` is `analyze`. Must include the scheme (`http://` or `https://`).
+</ParamField>
+
+<ParamField body="user_prompt" type="string">
+  Natural-language guidance passed to the LLM alongside the data analysis. Optional for all actions.
+</ParamField>
+
+<ParamField body="llm_choice" type="string">
+  Model identifier from the LLM catalog, or `"custom"` to use the model configured in the user's profile. Required for `analyze` and `regenerate`.
+</ParamField>
+
+<ParamField body="api_request_id" type="integer">
+  ID of an existing `APIRequest`. Required for `regenerate` and `accept_plan`.
+</ParamField>
+
+<ParamField body="file_input" type="file">
+  Upload a JSON or XML file directly instead of providing a URL. Mutually exclusive with `api_url` for the `analyze` action.
+</ParamField>
+
+### Actions
+
+#### `analyze` (default)
+
+1. Validates `api_url` (or reads `file_input`).
+2. Fetches and parses the remote URL, or reads the uploaded file.
+3. Runs structural analysis to identify the main data collection and available field keys.
+4. Calls the selected LLM to generate a `field_mapping` plan.
+5. Creates an `APIRequest` record with `status="processed"` and the generated plan.
+6. Re-renders the assistant page with the analysis and LLM plan.
+
+Raw fetch results are cached for 1 hour. A repeated request for the same URL within that window loads from cache and skips the network fetch.
+
+<Warning>
+  If the URL cannot be fetched or parsed, the `APIRequest` is saved with `status="error"` and an error message is displayed. No redirect occurs.
+</Warning>
+
+#### `regenerate`
+
+Re-runs the LLM plan on an existing `APIRequest` without re-fetching the URL. The existing `parsed_data` and `raw_data` are reused. The `plan_accepted` flag is reset to `False`.
+
+Requires `api_request_id` in the form body. If the record is not found for the current user, redirects to `/asistente`.
+
+#### `accept_plan`
+
+Sets `plan_accepted=True` on the specified `APIRequest`, enabling the site generation step. Redirects to `/asistente?api_request_id=<id>` after saving.
+
+Requires `api_request_id`. If `field_mapping` is empty, the action is rejected with an error message.
+
+---
+
+## POST /edit/\<api_request_id\>
+
+Allows editing the accepted LLM plan before triggering site generation.
+
+### Path parameters
+
+<ParamField path="api_request_id" type="integer" required>
+  ID of the `APIRequest` whose plan will be edited. Must belong to the authenticated user.
+</ParamField>
+
+### Response
+
+Returns the edit form page pre-populated with the current `field_mapping`. Submitting the form updates `field_mapping` in the database.

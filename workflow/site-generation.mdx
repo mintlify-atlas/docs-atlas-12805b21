@@ -1,0 +1,178 @@
+---
+title: "Site generation"
+description: "The eight-step pipeline that turns an accepted plan into a complete Django project."
+---
+
+Once you accept a plan, WebBuilder runs an eight-step pipeline that produces a fully working Django project. Generation runs **asynchronously** in a background thread so the UI remains responsive while the LLM calls execute.
+
+## The pipeline
+
+<Steps>
+  <Step title="Pages structure">
+    The LLM decides what pages the site will have — always at least a home page, a list page, and a detail page — and returns a JSON array describing each one:
+
+    ```json
+    {
+      "pages": [
+        { "name": "home",    "url": "/",           "template": "siteapp/home.html",   "view_name": "home",    "is_list": false, "is_detail": false },
+        { "name": "catalog", "url": "/catalog/",   "template": "siteapp/catalog.html","view_name": "catalog", "is_list": true,  "is_detail": false },
+        { "name": "detail",  "url": "/item/<pk>/", "template": "siteapp/detail.html", "view_name": "detail",  "is_list": false, "is_detail": true  }
+      ]
+    }
+    ```
+
+    Up to 6 pages total. The LLM may add optional pages (about, search, categories) based on your prompt. If the output is missing a list or detail page, a deterministic fallback is used.
+  </Step>
+  <Step title="models.py">
+    The LLM generates a single Django model named `Item` with fields inferred from the plan. Field types are chosen from the sample data:
+
+    | Sample value pattern | Django field |
+    |---------------------|-------------|
+    | URL / image path | `URLField(blank=True)` |
+    | Long text or HTML | `TextField(blank=True)` |
+    | Short string | `CharField(max_length=500, blank=True)` |
+    | Integer | `IntegerField(null=True, blank=True)` |
+    | Decimal / price | `DecimalField(max_digits=12, decimal_places=2, ...)` |
+    | Date | `DateField(null=True, blank=True)` |
+    | Boolean | `BooleanField(null=True, blank=True)` |
+    | Nested dict | `CharField(max_length=500, blank=True)` (most representative value) |
+
+    All fields are optional. A `created_at = DateTimeField(auto_now_add=True)` is always added. An initial migration (`0001_initial.py`) is generated deterministically from the model code.
+  </Step>
+  <Step title="views.py">
+    The LLM generates one view function per page. Key behaviours baked in by the prompt rules:
+
+    - **List view** — paginated (12 items per page), with server-side search filtering on text fields via `Q` objects.
+    - **Detail view** — uses `get_object_or_404(Item, pk=pk)` and passes 3 random related items (`related`) to the template.
+    - **Home and other views** — pass the 6 most recent items as `featured`.
+    - Every view passes `site_title` in the context.
+
+    The exact model field names extracted from `models.py` are passed back to the prompt to prevent the LLM from inventing field names.
+  </Step>
+  <Step title="base.html">
+    The LLM generates a Tailwind CSS base template. It always includes:
+
+    - Tailwind CDN and Google Inter font in `<head>`.
+    - A sticky navbar with active-link highlighting using `request.path`.
+    - Authentication links (login / register / logout) on the right side of the navbar.
+    - A `{% block content %}{% endblock %}` inside `<main class="max-w-7xl mx-auto px-6 py-10">`.
+    - A two-column footer with navigation links and a copyright notice.
+    - CSS `@keyframes` for `fadeInUp` animations (`animate-in`, `animate-in-delay-1`, `animate-in-delay-2`).
+
+    The visual style (colours, tone) follows your original user prompt.
+  </Step>
+  <Step title="Per-page templates">
+    One LLM call is made per page. Each template extends `base.html` and must satisfy a set of visual requirements:
+
+    - **Home** — hero with gradient H1, stats section, featured items grid with hover effects.
+    - **List** — responsive grid, live client-side search input, empty state with SVG icon, pagination.
+    - **Detail** — breadcrumb, two-column desktop layout, all fields shown, related items section.
+
+    Real URL names (from step 1) are injected into the prompt so `{% url %}` tags are always correct.
+  </Step>
+  <Step title="load_data.py management command">
+    The LLM generates a Django management command that fetches data from your original API URL and populates the `Item` model. It:
+
+    - Navigates to the correct nested path in the JSON response (using `main_collection_path`).
+    - Uses `get_or_create` / `update_or_create` to avoid duplicates.
+    - Handles nested dict values by extracting the most representative sub-value as a string.
+    - Wraps everything in a `try/except` so a single bad item does not abort the import.
+  </Step>
+  <Step title="seed_users.py (conditional)">
+    If you configured site users before generating, WebBuilder creates a deterministic `seed_users` management command. For each user it calls `create_superuser` (role `super`) or `create_user` (role `normal`), and skips users that already exist.
+
+    This step is skipped entirely if no site users were configured.
+  </Step>
+  <Step title="Static files">
+    All infrastructure files are assembled deterministically — no LLM involved:
+
+    - `settings.py` — SQLite database, `ALLOWED_HOSTS = ['*']`, auth redirect URLs.
+    - `manage.py`, `wsgi.py`, `urls.py` — standard Django scaffolding.
+    - `requirements.txt` — `django>=4.2`, `requests>=2.28`, `gunicorn>=21.0`.
+    - `Dockerfile` — Python 3.12-slim base image, port 8000.
+    - `entrypoint.sh` — runs `migrate`, `load_data`, `seed_users`, then starts Gunicorn.
+    - Authentication templates (`login.html`, `register.html`, `logged_out.html`).
+    - `apps.py`, `admin.py`, `__init__.py` files for the `siteapp` app.
+  </Step>
+</Steps>
+
+## Auto-correction
+
+After all files are generated, `check_consistency` validates that every model field referenced in `views.py` and the templates actually exists in `models.py`. If issues are found:
+
+- Affected files (`views.py` and/or individual templates) are regenerated with the list of inconsistencies appended to the prompt as a correction hint.
+- Only files with errors are regenerated — the rest are kept as-is.
+
+## Status polling
+
+The UI polls `/site/<id>/status/` every few seconds during generation. The endpoint returns:
+
+```json
+{
+  "status": "generating | ready | error",
+  "error": "",
+  "files_count": 24
+}
+```
+
+When `status` becomes `ready`, the UI reloads to show the generated file tree.
+
+## Generated project structure
+
+```
+my_project/
+├── manage.py
+├── requirements.txt
+├── Dockerfile
+├── entrypoint.sh
+├── my_project/
+│   ├── __init__.py
+│   ├── settings.py
+│   ├── urls.py
+│   └── wsgi.py
+├── siteapp/
+│   ├── __init__.py
+│   ├── apps.py
+│   ├── admin.py
+│   ├── auth_views.py
+│   ├── models.py
+│   ├── views.py
+│   ├── urls.py
+│   ├── migrations/
+│   │   ├── __init__.py
+│   │   └── 0001_initial.py
+│   ├── management/
+│   │   └── commands/
+│   │       ├── load_data.py
+│   │       └── seed_users.py   ← only if site users were configured
+│   └── templates/
+│       ├── base.html
+│       └── siteapp/
+│           ├── home.html
+│           ├── catalog.html
+│           └── detail.html
+└── templates/
+    └── registration/
+        ├── login.html
+        ├── register.html
+        └── logged_out.html
+```
+
+## Running the generated project
+
+```bash
+python manage.py migrate
+python manage.py load_data
+python manage.py runserver
+```
+
+Or with Docker (runs migrate, load_data, seed_users, and Gunicorn automatically):
+
+```bash
+docker build -t my_project .
+docker run -p 8000:8000 my_project
+```
+
+<Note>
+Every LLM call in the pipeline has a deterministic fallback. If the model returns empty output, a minimal but functional version of the file is used instead, so generation never stalls completely.
+</Note>

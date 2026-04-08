@@ -1,0 +1,234 @@
+---
+title: "Prompt engineering"
+description: "How WebBuilder's prompts are structured and how to influence generated output."
+---
+
+WebBuilder uses two distinct prompt phases: an **analysis phase** that decides what the site will contain, and a **generation phase** that produces the actual Django code and HTML. Understanding this separation helps you write user prompts that produce better results.
+
+## Two-phase design
+
+```
+User submits URL
+      │
+      ▼
+┌─────────────────┐
+│  Analysis phase │  ← 1 LLM call (planner.py)
+│  generate_site_ │    Returns: site_type, site_title, fields[]
+│  plan()         │
+└────────┬────────┘
+         │  User reviews & accepts plan
+         ▼
+┌─────────────────┐
+│ Generation phase│  ← 6 sequential LLM calls (generator_prompts.py)
+│ generate_project│    Returns: {path: file_content} dict
+│ _files()        │
+└─────────────────┘
+```
+
+---
+
+## Analysis phase
+
+**Module:** `WebBuilder/utils/llm/planner.py` — `generate_site_plan()`
+
+The planner LLM receives:
+
+- `available_keys` — the flat list of keys extracted from the dataset (e.g. `["id", "title", "price", "category"]`)
+- `examples` — 1–3 sample items from the dataset so the model understands what values each key holds
+- `main_collection_path` — the detected path to the primary list within the JSON (e.g. `["results"]` or `["data", "items"]`)
+- `user_prompt` — the user's optional free-text instruction
+
+The model must return a single JSON object:
+
+```json
+{
+  "site_type": "catalog",
+  "site_title": "Products Store",
+  "fields": [
+    { "key": "title",    "label": "Product name" },
+    { "key": "price",    "label": "Price" },
+    { "key": "category", "label": "Category" }
+  ]
+}
+```
+
+`site_type` must be one of: `blog`, `portfolio`, `catalog`, `dashboard`, or `other`.
+
+<Note>
+  Every `key` in `fields` is validated against `available_keys` before being saved. Keys that do not appear in the dataset are silently discarded. If the LLM returns no valid fields, all keys up to 12 are used as a fallback.
+</Note>
+
+The planner runs at **temperature 0.0** and supports one automatic retry if the JSON cannot be parsed. It never raises an exception — any failure returns a valid fallback schema using all available keys.
+
+---
+
+## Generation phase
+
+**Module:** `WebBuilder/utils/llm/generator_prompts.py`
+
+Six separate LLM calls are made in sequence. Each call has its own system prompt and a detailed user prompt built from the accepted plan.
+
+### Step 1 — Page structure (`prompt_pages_structure`)
+
+Decides what pages the site will have. Returns a JSON `pages` array. Every site is required to have at least three pages: a landing page (`home`), a full listing page (`is_list: true`), and a detail page (`is_detail: true`). Up to six pages total.
+
+```json
+{
+  "pages": [
+    { "name": "home",    "url": "/",          "view_name": "home",    "template": "siteapp/home.html",    "is_list": false, "is_detail": false },
+    { "name": "catalog", "url": "/catalog/",  "view_name": "catalog", "template": "siteapp/catalog.html", "is_list": true,  "is_detail": false },
+    { "name": "detail",  "url": "/item/<pk>/","view_name": "detail",  "template": "siteapp/detail.html",  "is_list": false, "is_detail": true  }
+  ]
+}
+```
+
+### Step 2 — `models.py` (`prompt_models`)
+
+Generates a single `Item` model from the field plan. Field types are inferred from sample data values:
+
+| Sample value pattern | Django field |
+|---|---|
+| URL or image path | `URLField(blank=True)` |
+| Long text or HTML | `TextField(blank=True)` |
+| Short text | `CharField(max_length=500, blank=True)` |
+| Integer | `IntegerField(null=True, blank=True)` |
+| Decimal / price | `DecimalField(max_digits=12, decimal_places=2, ...)` |
+| Date string | `DateField(null=True, blank=True)` |
+| Boolean | `BooleanField(null=True, blank=True)` |
+| Nested dict | `CharField(max_length=500, blank=True)` — stores the most representative sub-value as a string |
+
+`JSONField` is explicitly banned. All fields are optional (`blank=True` / `null=True`). A `created_at = DateTimeField(auto_now_add=True)` is always added.
+
+### Step 3 — `views.py` (`prompt_views`)
+
+Generates one Django view function per page. The list view includes server-side search using `Q` objects and pagination (12 items per page). The detail view uses `get_object_or_404`. Non-list, non-detail views (home, about, etc.) receive the 6 most recent items as `featured`.
+
+The real field names extracted from the generated `models.py` (via `extract_model_fields()`) are injected into this prompt to prevent the model from referencing fields that do not exist.
+
+### Step 4 — `base.html` (`prompt_base_template`)
+
+Generates the shared layout template with:
+
+- Tailwind CSS loaded from CDN
+- Inter font from Google Fonts
+- Sticky navbar with active-link highlighting using `request.path`
+- Auth block (login/logout/register links) on the right side of the navbar
+- `{% block content %}{% endblock %}` inside a `max-w-7xl` container
+- Two-column footer with nav links and copyright
+- `fadeInUp` CSS animation keyframes for use in page templates
+
+The user's prompt is given **maximum priority** for visual style and colour choices in this step.
+
+### Step 5 — Per-page templates (`prompt_template`)
+
+One call per page in the pages list. Each call receives:
+
+- The page definition (name, description, `is_list`, `is_detail`)
+- The full field list and sample data
+- The real field names and real URL names (to prevent inventing `{% url %}` tags that do not exist)
+- Visual requirements specific to the page type
+
+**Home page requirements:** hero section with gradient text, stats/highlights cards, featured items grid with hover effects.
+
+**List page requirements:** search input with client-side JS filtering using `data-search` attributes, responsive grid (`grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4`), empty state with SVG.
+
+**Detail page requirements:** breadcrumb, two-column desktop layout, all model fields shown, related items section.
+
+### Step 6 — `load_data.py` (`prompt_load_data`)
+
+Generates a Django management command that fetches the original API URL and populates the `Item` table using `get_or_create`. The exact JSON collection path detected during analysis (`main_collection_path`) is injected so the model can navigate nested structures correctly. Value cleaning rules are specified: prices strip `$` and use `Decimal(str(...))`, nested dicts extract the most representative sub-value as a string.
+
+---
+
+## Prompt enrichment
+
+**Module:** `WebBuilder/utils/llm/enrich_prompt.py` — `enrich_user_prompt()`
+
+Before the generation phase starts, the user's raw prompt is enriched with dataset context (field names, site type, and sample values). This expanded prompt is then used for all six generation steps, ensuring that style and content instructions from the user are applied consistently across `base.html`, page templates, and `views.py`.
+
+---
+
+## Temperature strategy
+
+| Step | Temperature | Reason |
+|---|---|---|
+| `models.py` | 0.05 | Deterministic field names and types required |
+| `views.py` | 0.05 | Exact field references must match `models.py` |
+| `load_data.py` | 0.05 | Data mapping must be precise |
+| `base.html` | 0.1 | Consistent structure with mild stylistic variation |
+| Page templates | 0.4 | Creative visual design encouraged |
+| Analysis planner | 0.0 | Fully deterministic JSON output required |
+
+---
+
+## Consistency checker
+
+**Module:** `WebBuilder/utils/llm/consistency_checker.py` — `check_consistency()`
+
+After all six files are generated, `check_consistency()` scans `views.py` and every `.html` template for `item.<field>` references and checks them against the field names actually present in the generated `models.py`. Any reference to a field that does not exist in the model is reported as an error.
+
+If errors are found, `_regenerate_with_errors()` is called automatically:
+
+1. `views.py` is regenerated with the error list and the correct field names appended to the prompt.
+2. Each affected template is regenerated individually with its specific errors and the correct field list.
+
+<Note>
+  The consistency checker uses regex, not AST parsing. It catches `item.field_name` patterns but does not validate Python syntax or Django template tag correctness.
+</Note>
+
+`fix_template()` is also applied to every generated HTML file before it is stored. It strips stray Markdown fences (` ```html `, ` ``` `), ensures `{% extends %}` is on the first line, collapses excessive blank lines, and repairs common unclosed Django template tags.
+
+---
+
+## Writing effective user prompts
+
+The user prompt is optional, but providing one significantly improves the visual quality and content focus of the generated site.
+
+<Tip>
+  The more specific your prompt, the more faithfully the generated site reflects your intent. Vague prompts produce generic dark-themed sites; specific prompts produce distinctive, on-brand results.
+</Tip>
+
+**Examples that produce good results:**
+
+```
+Make it look like a modern news site with a hero image and breaking news banner
+```
+
+```
+Use a dark theme with card-based layout, focus on the price and availability fields
+```
+
+```
+Minimalist white design, highlight the author and publication date prominently
+```
+
+```
+E-commerce style with a prominent search bar, category filters, and price badges
+```
+
+<AccordionGroup>
+  <Accordion title="Style prompts">
+    Describe the visual personality of the site. The LLM applies these instructions primarily to `base.html` and page templates.
+
+    - `"dark theme with neon accents"` → dark backgrounds, bright colour highlights
+    - `"clean minimalist white"` → light backgrounds, generous whitespace
+    - `"retro newspaper style"` → serif fonts, column layouts
+    - `"dashboard with data tables"` → dense information layout, tabular data
+  </Accordion>
+
+  <Accordion title="Content focus prompts">
+    Tell the LLM which fields matter most. This influences both the page structure decision (step 1) and the visual hierarchy within templates.
+
+    - `"focus on the image and title, hide technical metadata"` → images are prominent, secondary fields are collapsed
+    - `"price and availability are the most important fields"` → large price display, availability badge
+    - `"show the full description text on the listing page"` → list cards include description excerpt
+  </Accordion>
+
+  <Accordion title="Page structure prompts">
+    Guide the page structure decision in step 1.
+
+    - `"add a category filter page"` → LLM may add a categories page to the structure
+    - `"include an about page with site statistics"` → adds an about page with item count stats
+    - `"no detail page needed, show everything on the list"` → detail page may be omitted (though a minimum of 3 pages is enforced)
+  </Accordion>
+</AccordionGroup>

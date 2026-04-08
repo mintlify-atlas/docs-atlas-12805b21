@@ -1,0 +1,100 @@
+---
+title: "Docker setup"
+description: "Run WebBuilder and n8n with Docker for production-ready deployments."
+---
+
+## WebBuilder itself
+
+WebBuilder is a standard Django application. There is no pre-built Docker image — you run it directly with Python, or containerize it yourself. The typical setup is:
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/AlejandroTejero/WebBuilder-TFG
+    cd WebBuilder-TFG
+    ```
+  </Step>
+  <Step title="Configure environment variables">
+    ```bash
+    cp .env.example .env
+    ```
+    Open `.env` and fill in your LLM API key and any other required values. See [Environment variables](/self-hosting/environment-variables) for the full reference.
+  </Step>
+  <Step title="Install dependencies and run">
+    ```bash
+    pip install -r requirements.txt
+    python manage.py migrate
+    python manage.py runserver
+    ```
+    WebBuilder is now running at `http://localhost:8000`.
+  </Step>
+</Steps>
+
+## Generated sites
+
+Every site produced by WebBuilder is a self-contained Django project that includes its own `Dockerfile` and `entrypoint.sh`. You do not need WebBuilder running to deploy a generated site.
+
+The generated `Dockerfile` uses `python:3.12-slim` and serves the app with Gunicorn:
+
+```dockerfile
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+EXPOSE 8000
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+CMD ["/entrypoint.sh"]
+```
+
+The `entrypoint.sh` runs migrations, loads API data, and starts Gunicorn automatically:
+
+```bash
+#!/bin/sh
+set -e
+
+python manage.py makemigrations siteapp --noinput
+python manage.py migrate --noinput
+python manage.py load_data
+python manage.py seed_users
+gunicorn --bind 0.0.0.0:8000 --workers 2 --timeout 120 <project>.wsgi:application
+```
+
+To run a downloaded site:
+
+```bash
+unzip mysite.zip
+cd mysite
+docker build -t mysite .
+docker run -p 8001:8000 mysite
+```
+
+The site will be available at `http://localhost:8001`.
+
+## n8n integration
+
+If you want the automated deployment feature (WebBuilder triggers n8n, which runs the generated site's container), you need to run n8n alongside WebBuilder and configure a shared filesystem path.
+
+<Warning>
+  The n8n deployment workflow requires n8n to have access to the Docker socket and to the same filesystem path configured in `N8N_LOCAL_FILES_PATH`. Make sure both services can read and write to that path.
+</Warning>
+
+Set the following variables in `.env`:
+
+```env
+N8N_DEPLOY_WEBHOOK=http://localhost:5678/webhook/webbuilder-deploy
+N8N_LOCAL_FILES_PATH=/shared/path/accessible/to/n8n
+```
+
+WebBuilder writes the generated ZIP to `N8N_LOCAL_FILES_PATH` and then calls `N8N_DEPLOY_WEBHOOK`. The n8n workflow picks up the file, extracts it, builds the Docker image, and starts the container.
+
+<Note>
+  If you do not configure the n8n variables, the rest of WebBuilder (API ingestion, analysis, code generation, and ZIP download) continues to work normally.
+</Note>

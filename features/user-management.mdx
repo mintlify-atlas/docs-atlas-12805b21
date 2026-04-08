@@ -1,0 +1,72 @@
+---
+title: "Site user management"
+description: "Configure the users that will be pre-seeded into your generated Django site."
+---
+
+Before generating a site, you can define the users that will be embedded into the output. WebBuilder writes these users into a `seed_users.py` management command inside the generated project, so the target Django app can create them with a single command after deployment.
+
+## The SiteUser model
+
+Each user entry linked to a `GeneratedSite` stores:
+
+| Field | Type | Description |
+|---|---|---|
+| `username` | string | Must be unique per site |
+| `password` | string | Plaintext at configuration time; embedded in the seed file |
+| `role` | string | `super` or `normal` |
+
+## Role types
+
+| Role | Description |
+|---|---|
+| `super` | Django superuser — can access `/admin` and has all permissions |
+| `normal` | Regular Django user — standard authenticated access only |
+
+## Saving users via the API
+
+Users are saved by posting the full list to the site's user endpoint. The existing list is replaced on each call.
+
+```http
+POST /site/<id>/users/save/
+Content-Type: application/json
+```
+
+```json
+{
+  "users": [
+    { "username": "admin", "password": "secret", "role": "super" },
+    { "username": "viewer", "password": "pass456", "role": "normal" }
+  ]
+}
+```
+
+Response:
+
+```json
+{ "ok": true, "saved": 2 }
+```
+
+## How seed_users.py works
+
+The generated project contains a `seed_users.py` management command. When you run it inside the generated site, it creates the configured users. Users whose username already exists in the database are skipped without error.
+
+```python
+USERS = [
+    ('admin', 'secret123', 'super'),
+    ('viewer', 'pass456', 'normal'),
+]
+```
+
+To seed users after deploying the generated site:
+
+```bash
+python manage.py seed_users
+```
+
+<Warning>
+  Passwords are stored as plaintext in the generated `seed_users.py` file. Use strong, temporary passwords and change them after the first login.
+</Warning>
+
+<Note>
+  The `username` field has a unique constraint per site. Submitting two users with the same username for the same site will cause a validation error.
+</Note>

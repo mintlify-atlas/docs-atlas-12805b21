@@ -1,0 +1,72 @@
+---
+title: "Environment variables"
+description: "Complete reference for all environment variables used by WebBuilder."
+---
+
+Copy `.env.example` to `.env` in the project root before starting the application:
+
+```bash
+cp .env.example .env
+```
+
+The `.env` file is loaded automatically by `manage.py` via `python-dotenv`. All variables are optional at the Python level (they have fallback defaults in `settings.py`), but the ones marked **Required** below must be set for the application to function correctly.
+
+## Variable reference
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `LLM_BASE_URL` | Yes | `https://openrouter.ai/api/v1` | Base URL for the LLM provider. Must point to an OpenAI-compatible `/chat/completions` endpoint. |
+| `LLM_API_KEY` | Yes | — | API key for the LLM provider. |
+| `LLM_MODEL` | Yes | `meta-llama/llama-3.3-70b-instruct:free` | Model identifier to use for analysis and code generation. |
+| `SECRET_KEY` | Yes | — | Django secret key used for cryptographic signing. Must be unique and kept secret in production. |
+| `N8N_WEBHOOK_REGISTRO` | No | `http://localhost:5678/webhook/WebBuilder-Register` | Webhook URL called when a new user registers. Used to trigger welcome emails. |
+| `N8N_WEBHOOK_LOGIN` | No | `http://localhost:5678/webhook/WebBuilder-Login` | Webhook URL called on each login. Used to send session notifications. |
+| `N8N_DEPLOY_WEBHOOK` | No | `http://localhost:5678/webhook/webbuilder-deploy` | Webhook URL called to trigger automated deployment of a generated site via n8n. |
+| `N8N_LOCAL_FILES_PATH` | No | — | Absolute filesystem path where WebBuilder writes generated ZIPs for n8n to pick up. Must be accessible to both services. |
+| `FIELD_ENCRYPTION_KEY` | No | — | Encryption key for `django-encrypted-model-fields`. Required if you want to store user-supplied API keys encrypted at rest. |
+
+## `.env.example`
+
+This is the file shipped with the repository:
+
+```env
+LLM_BASE_URL=https://openrouter.ai/api/v1
+LLM_API_KEY=KEY_HERE
+LLM_MODEL=liquid/lfm-2.5-1.2b-instruct:free
+```
+
+You can switch providers by changing all three values. For example, to use Groq:
+
+```env
+LLM_BASE_URL=https://api.groq.com/openai/v1
+LLM_API_KEY=your_groq_api_key
+LLM_MODEL=llama-3.3-70b-versatile
+```
+
+## Generating a SECRET_KEY
+
+<Warning>
+  Never use the default or an empty `SECRET_KEY` in production. Django uses it for session signing, CSRF tokens, and password reset links. A compromised key exposes your entire application.
+</Warning>
+
+Generate a secure key with:
+
+```bash
+python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
+```
+
+Copy the output into your `.env`:
+
+```env
+SECRET_KEY=your-generated-key-here
+```
+
+## Security notes
+
+<Warning>
+  Never commit your `.env` file to version control. It contains secrets that would expose your LLM API key, Django secret key, and encryption key. The repository's `.gitignore` already excludes `.env`, but double-check before pushing.
+</Warning>
+
+<Note>
+  The `FIELD_ENCRYPTION_KEY` is only needed if users will supply their own LLM API keys through the WebBuilder UI. If you are the sole user and manage keys only via `.env`, you can leave it unset.
+</Note>

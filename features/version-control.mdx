@@ -1,0 +1,88 @@
+---
+title: "Version history"
+description: "Every regeneration creates a snapshot. Browse, restore, or download any previous version."
+---
+
+WebBuilder automatically snapshots your generated site before any destructive operation. Every snapshot is stored as a `SiteVersion` record containing the complete set of project files, so you can always get back to a working state.
+
+## The SiteVersion model
+
+Each version record stores:
+
+| Field | Type | Description |
+|---|---|---|
+| `version_number` | integer | Monotonically increasing, most recent first |
+| `project_files` | JSON | Full `{path: content}` dict of every generated file |
+| `label` | string | Auto-assigned description of why the snapshot was taken |
+| `created_at` | datetime | Timestamp of the snapshot |
+
+## When snapshots are created
+
+Snapshots are created automatically — you do not need to trigger them manually.
+
+| Trigger | Label assigned |
+|---|---|
+| Before any regeneration | `Antes de regenerar` |
+| Before restoring a previous version | `Antes de restaurar` |
+
+<Info>
+  A snapshot is only created if the site already has generated files. Empty or pending sites do not produce a version record.
+</Info>
+
+## Viewing versions
+
+Send a `GET` request to retrieve the version list for a site:
+
+```http
+GET /site/<id>/versions/
+```
+
+Response:
+
+```json
+{
+  "versions": [
+    {
+      "id": 42,
+      "version_number": 3,
+      "label": "Antes de regenerar",
+      "created_at": "08/04/2026 14:23"
+    },
+    {
+      "id": 31,
+      "version_number": 2,
+      "label": "Antes de restaurar",
+      "created_at": "07/04/2026 09:11"
+    }
+  ]
+}
+```
+
+Versions are ordered by descending `version_number` — the most recent snapshot appears first.
+
+## Restoring a version
+
+```http
+POST /site/<id>/versions/<vid>/restore/
+```
+
+The restore operation follows two steps:
+
+1. The current project files are saved as a new snapshot (labelled `Antes de restaurar`).
+2. The selected version's files replace the current `project_files`.
+
+<Warning>
+  Restoring a version sets `generation_status` back to `ready`. The site is immediately available for editing or download — but any in-progress generation will be overwritten.
+</Warning>
+
+## Downloading a version
+
+```http
+GET /site/<id>/versions/<vid>/download/
+```
+
+Returns a ZIP archive of the selected version's files. The filename follows the pattern `<project_name>_v<version_number>.zip`.
+
+<Note>
+  Version labels are assigned automatically based on the operation that triggered the snapshot. Manual naming of versions is not currently supported.
+</Note>

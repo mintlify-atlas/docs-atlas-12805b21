@@ -1,0 +1,100 @@
+---
+title: "Deployment"
+description: "Download your generated site as a ZIP or deploy it live via n8n."
+---
+
+Once generation completes (`generation_status` is `ready`), you have two ways to get your site running: download a ZIP and run it yourself, or trigger a one-click live deployment through an n8n workflow.
+
+## Download ZIP
+
+Click **Download ZIP** to receive the entire generated project as a single archive. The endpoint `/site/<id>/download/` streams a ZIP built in memory:
+
+```python
+# All project_files are written into the archive at their relative paths
+with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+    for path, content in site.project_files.items():
+        zf.writestr(path, content)
+```
+
+The downloaded filename is `<project_slug>.zip`. Extract it and run:
+
+```bash
+python manage.py migrate
+python manage.py load_data
+python manage.py runserver
+```
+
+## One-click deployment via n8n
+
+<Warning>
+`N8N_DEPLOY_WEBHOOK` and `N8N_LOCAL_FILES_PATH` must be set in your environment for the deploy button to work. Without them, the deploy will fail immediately.
+</Warning>
+
+WebBuilder does not build or host containers itself. It hands off to an external **n8n** workflow that handles the Docker build and container start. WebBuilder's role is to prepare the ZIP, trigger the workflow, and poll for the result.
+
+### Deployment flow
+
+<Steps>
+  <Step title="Build ZIP in memory">
+    The same ZIP used for download is constructed in memory using `io.BytesIO` and `zipfile.ZipFile`.
+  </Step>
+  <Step title="Save ZIP to shared directory">
+    The ZIP is written to a directory that n8n can access:
+
+    ```
+    N8N_LOCAL_FILES_PATH/deploys/<project_name>/<project_name>.zip
+    ```
+
+    The directory is created with `os.makedirs(..., exist_ok=True)` if it does not exist.
+  </Step>
+  <Step title="POST to n8n webhook">
+    WebBuilder sends a POST request to `N8N_DEPLOY_WEBHOOK` with:
+
+    ```json
+    {
+      "project_name": "my_project",
+      "site_id": "42"
+    }
+    ```
+
+    The webhook call is **blocking** (runs in a background thread) and has a **180-second timeout**. n8n is expected to build the Docker image, start the container, and return a `preview_url` in the response body.
+  </Step>
+  <Step title="Poll for result">
+    While the background thread is running, the UI polls `/site/<id>/deploy-status/` every few seconds. The endpoint returns:
+
+    ```json
+    {
+      "deploy_status": "deploying",
+      "deploy_error": "",
+      "preview_url": ""
+    }
+    ```
+
+    Once n8n responds, the thread updates the database and the next poll reflects the final state.
+  </Step>
+  <Step title="Show preview URL">
+    When `deploy_status` becomes `done`, the `preview_url` returned by n8n is stored on the `GeneratedSite` record and displayed as a clickable link in the UI.
+  </Step>
+</Steps>
+
+### Deploy status values
+
+| Value | Meaning |
+|-------|---------|
+| `idle` | No deployment has been triggered |
+| `deploying` | Background thread is running; n8n has been called |
+| `done` | Deployment succeeded; `preview_url` is available |
+| `error` | Something failed; `deploy_error` contains the message |
+
+### Error cases
+
+| Error message | Cause |
+|---------------|-------|
+| `Error al guardar el ZIP en disco` | Could not write to `N8N_LOCAL_FILES_PATH` |
+| `n8n tardó demasiado en responder (timeout 180 s)` | n8n did not complete within 3 minutes |
+| `No se pudo conectar con n8n` | n8n is not reachable (wrong URL or service down) |
+| `n8n no devolvió una preview_url` | n8n workflow completed but returned no URL |
+
+<Info>
+n8n handles the actual Docker build and container start. WebBuilder only triggers the workflow and stores the result. The specific steps inside n8n (registry push, reverse proxy config, etc.) are defined in your n8n workflow and are outside WebBuilder's scope.
+</Info>

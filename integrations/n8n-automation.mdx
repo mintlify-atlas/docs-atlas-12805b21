@@ -1,0 +1,140 @@
+---
+title: "n8n automation"
+description: "Connect email notifications and deployment workflows using n8n."
+---
+
+[n8n](https://n8n.io) is a self-hosted workflow automation platform. It lets you build pipelines that respond to HTTP webhooks, connect to external services, and run code — without modifying WebBuilder itself.
+
+WebBuilder fires three n8n webhooks at key moments in the user lifecycle.
+
+## Environment variables
+
+Add these to your `.env` file:
+
+```ini .env
+N8N_WEBHOOK_REGISTRO=http://localhost:5678/webhook/WebBuilder-Register
+N8N_WEBHOOK_LOGIN=http://localhost:5678/webhook/WebBuilder-Login
+N8N_DEPLOY_WEBHOOK=http://localhost:5678/webhook/webbuilder-deploy
+N8N_LOCAL_FILES_PATH=/path/to/n8n/local-files
+```
+
+<Note>
+If `N8N_WEBHOOK_REGISTRO` or `N8N_WEBHOOK_LOGIN` are left empty, those webhook calls are silently skipped and the user flow continues normally.
+</Note>
+
+<Warning>
+If `N8N_DEPLOY_WEBHOOK` is not configured, clicking the Deploy button will produce an error. This webhook is required for deployment to work.
+</Warning>
+
+---
+
+## Webhook 1: registration
+
+**Setting:** `N8N_WEBHOOK_REGISTRO`
+
+Triggered immediately after a new user account is saved, before the user is redirected to the home page. Typical use: send a welcome email.
+
+**Payload**
+
+```json
+{
+  "username": "alice",
+  "email": "alice@example.com"
+}
+```
+
+**Behavior:** fire-and-forget. WebBuilder posts to the webhook with a 5-second timeout. Any network error or non-2xx response is silently swallowed — the registration always succeeds regardless.
+
+---
+
+## Webhook 2: login
+
+**Setting:** `N8N_WEBHOOK_LOGIN`
+
+Triggered on every successful login. Typical use: send a login-notification email with the IP and device.
+
+**Payload**
+
+```json
+{
+  "username": "alice",
+  "email": "alice@example.com",
+  "ip": "203.0.113.42",
+  "dispositivo": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)...",
+  "hora": "08/04/2026 14:35"
+}
+```
+
+**Behavior:** fire-and-forget, same as the registration webhook (5-second timeout, errors silently swallowed).
+
+---
+
+## Webhook 3: deploy
+
+**Setting:** `N8N_DEPLOY_WEBHOOK`
+
+Triggered when a user clicks **Deploy** on a generated site. This webhook is **synchronous** — WebBuilder's background thread waits up to 180 seconds for n8n to respond.
+
+### How it works
+
+<Steps>
+  <Step title="WebBuilder writes the ZIP">
+    Before calling the webhook, WebBuilder builds the project ZIP in memory and writes it to:
+
+    ```
+    <N8N_LOCAL_FILES_PATH>/deploys/<project_name>/<project_name>.zip
+    ```
+
+    This path must be a volume shared between the WebBuilder container and the n8n container.
+  </Step>
+  <Step title="WebBuilder calls n8n">
+    WebBuilder sends a POST request with the following payload:
+
+    ```json
+    {
+      "project_name": "my_events_site",
+      "site_id": "42"
+    }
+    ```
+  </Step>
+  <Step title="n8n builds and runs the container">
+    Your n8n workflow should unzip the project, build a Docker image, and start the container on a known port.
+  </Step>
+  <Step title="n8n returns the preview URL">
+    The workflow must respond with a JSON body containing `preview_url`:
+
+    ```json
+    {
+      "preview_url": "http://localhost:8001"
+    }
+    ```
+
+    WebBuilder stores this URL and displays it in the site dashboard.
+  </Step>
+</Steps>
+
+**Behavior:** blocking (synchronous in a background thread). If n8n does not respond within 180 seconds, or if the response does not contain `preview_url`, the deploy is marked as failed and the error is surfaced in the UI.
+
+### Shared volume
+
+`N8N_LOCAL_FILES_PATH` must point to the same directory inside both containers. Example `docker-compose.yml` volume mapping:
+
+```yaml
+services:
+  webbuilder:
+    volumes:
+      - ./n8n/local-files:/home/alejandro/Desktop/TFG/docker/n8n/local-files
+  n8n:
+    volumes:
+      - ./n8n/local-files:/home/node/.n8n/local-files
+```
+
+---
+
+## Summary
+
+| Webhook | Setting | Trigger | Timeout | Blocking |
+|---|---|---|---|---|
+| Registration | `N8N_WEBHOOK_REGISTRO` | User signs up | 5 s | No |
+| Login | `N8N_WEBHOOK_LOGIN` | User logs in | 5 s | No |
+| Deploy | `N8N_DEPLOY_WEBHOOK` | User clicks Deploy | 180 s | Yes |

@@ -1,0 +1,128 @@
+---
+title: "API ingestion"
+description: "How WebBuilder fetches, detects, and parses JSON and XML data from public APIs."
+---
+
+WebBuilder accepts data from public APIs in two ways: by fetching a URL directly, or by uploading a local file. Both paths produce the same result — a parsed dataset stored on the `APIRequest` model and ready for analysis.
+
+## Input modes
+
+The `APIRequest` model records how the data arrived via its `input_type` field:
+
+| Value | Meaning |
+|-------|---------|
+| `url` | WebBuilder fetched the data from a remote URL |
+| `file` | You uploaded a JSON or XML file directly |
+
+## URL fetching
+
+When `input_type` is `url`, WebBuilder calls `fetch_url` from `utils/ingest/url_reader.py`. It:
+
+1. Validates that the URL scheme is `http` or `https`.
+2. Sends a `GET` request with an 8-second timeout and a `User-Agent: WebBuilder/1.0` header.
+3. Checks the `Content-Length` response header before streaming to avoid downloading oversized responses.
+4. Streams the response body in 8 KB chunks, stopping if the total exceeds **1 MB**.
+5. Decodes the bytes using the encoding reported by the server (falling back to UTF-8).
+
+```python
+raw_text, summary = fetch_url("https://api.example.com/data.json")
+```
+
+<Note>
+File uploads follow the same size limit (1 MB). The file is decoded as UTF-8 with replacement for any invalid bytes.
+</Note>
+
+## Format detection
+
+Format detection happens in two places:
+
+- **Content-type headers** are implicitly used because the raw body is inspected directly.
+- **Raw content inspection** in `detect_format` (from `utils/ingest/parsers.py`) checks the first non-whitespace character:
+
+| First character | Detected format |
+|-----------------|-----------------|
+| `{` or `[` | JSON |
+| `<` | XML |
+| Anything else | Unknown (error) |
+
+## Parsing
+
+Once the format is detected, `parse_raw` produces a Python object:
+
+<CodeGroup>
+
+```python JSON parsing
+import json
+parsed = json.loads(raw_text)
+```
+
+```python XML parsing
+from defusedxml import ElementTree as DefusedET
+import xmltodict
+
+# Security validation — prevents XXE (XML External Entity) attacks
+DefusedET.fromstring(raw_text.encode("utf-8"))
+# Convert to a Python dict with the same shape as JSON
+parsed = xmltodict.parse(raw_text)
+```
+
+</CodeGroup>
+
+`defusedxml` is used instead of the standard library's `xml.etree.ElementTree` specifically to prevent **XXE (XML External Entity) injection attacks**, where a malicious XML payload could read local files or make server-side requests.
+
+Both JSON and XML root structures are supported — the root can be a dict, a list, or any nested combination.
+
+## Caching
+
+To avoid redundant network requests, successful fetches are cached in Django's cache backend for **1 hour**. The cache key is derived from an MD5 hash of the URL:
+
+```python
+import hashlib
+cache_key = f"api_analysis:{hashlib.md5(api_url.encode('utf-8')).hexdigest()}"
+cache.set(cache_key, {...}, 3600)  # 3600 seconds = 1 hour
+```
+
+On a cache hit, the stored `raw_text`, `parsed_payload`, and `response_summary` are reused, and no HTTP request is made.
+
+## Data stored on APIRequest
+
+After a successful ingest, the following fields are written to the `APIRequest` model:
+
+| Field | Contents |
+|-------|----------|
+| `raw_data` | The original text response (before parsing) |
+| `parsed_data` | The fully parsed payload, stored as a `JSONField` |
+| `response_summary` | A short human-readable summary (e.g. `HTTP 200. 4821 characters. (4821 bytes) Formato detectado: json. Raíz: list. Elementos: 100.`) |
+| `status` | `"processed"` on success, `"error"` on failure |
+| `error_message` | Empty on success; the exception message on failure |
+
+## Error handling
+
+If any step — URL validation, network request, or parsing — raises an exception:
+
+- `status` is set to `"error"`.
+- `error_message` is populated with the exception text.
+- The UI displays a friendly error banner to the user.
+
+Common errors and their causes:
+
+| Error | Cause |
+|-------|-------|
+| `La URL debe empezar por http:// o https://` | Non-HTTP scheme (e.g. `ftp://`) |
+| `La URL ha tardado demasiado en responder (timeout)` | Server did not respond within 8 seconds |
+| `No se pudo conectar con la URL` | DNS failure or connection refused |
+| `Error HTTP al acceder a la URL` | 4xx / 5xx response status |
+| `Respuesta demasiado grande` | Response body exceeds 1 MB |
+| `El contenido no parece JSON ni XML` | Format detection returned `unknown` |
+
+## Supported formats
+
+| Format | Root structure | Notes |
+|--------|---------------|-------|
+| JSON | Object (`{}`) or array (`[]`) | Standard `json.loads` |
+| JSON | Any nesting depth | Collection auto-detected by analysis step |
+| XML | Any root element | Converted to dict via `xmltodict`; XXE-safe via `defusedxml` |
+
+<Tip>
+If your API returns XML, WebBuilder converts it to a dict structure identical in shape to JSON before the analysis step runs — no special handling is required on your side.
+</Tip>

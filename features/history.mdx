@@ -1,0 +1,71 @@
+---
+title: "Analysis history"
+description: "Track all your API analyses and generated sites in one place."
+---
+
+WebBuilder maintains a full record of every API analysis and every site generation tied to your account. The history section has two separate views: one for analyses and one for generated sites.
+
+## Analysis history
+
+**URL:** `/historial/analisis`
+
+Shows all `APIRequest` records belonging to your account, ordered by date descending.
+
+### Filtering and search
+
+| Feature | Details |
+|---|---|
+| Status filter | `pending`, `processed`, or `error` |
+| URL search | Case-insensitive substring match against the API URL |
+| Pagination | 10 entries per page |
+
+### Status meanings
+
+| Status | Meaning |
+|---|---|
+| `pending` | The URL was fetched but not yet parsed or analysed |
+| `processed` | Successfully parsed and an API plan was generated |
+| `error` | The fetch or parse step failed |
+
+### Re-opening an analysis
+
+You can reopen any past analysis in the assistant by appending its ID to the assistant URL:
+
+```
+/asistente/?api_request_id=<id>
+```
+
+### Deleting an analysis
+
+```http
+POST /historial/eliminar/<id>
+```
+
+<Warning>
+  Deleting an analysis also deletes its associated `GeneratedSite` and all version history. This action cascades and cannot be undone.
+</Warning>
+
+## Sites history
+
+**URL:** `/historial/sitios`
+
+Shows all `GeneratedSite` records linked to your analyses, ordered by creation date descending.
+
+| Feature | Details |
+|---|---|
+| Title search | Case-insensitive match against the site's accepted plan title |
+| Pagination | 10 entries per page |
+
+### Deleting a site
+
+```http
+POST /historial/sitios/eliminar/<id>
+```
+
+Deletes the `GeneratedSite` record and all its associated version snapshots.
+
+## Metrics dashboard
+
+<Info>
+  Aggregate statistics across all your analyses and generated sites are available at `/metricas/`.
+</Info>

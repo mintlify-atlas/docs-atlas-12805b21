@@ -1,0 +1,113 @@
+---
+title: "Project structure"
+description: "Directory layout of the WebBuilder source code."
+---
+
+The repository is a standard Django project with a single application (`WebBuilder`) that contains all business logic. Generation utilities are organised into three sub-packages under `utils/`.
+
+```
+WebBuilder-TFG/
+├── manage.py                  # Django entry point
+├── .env.example               # Environment variable template
+├── project/
+│   ├── settings.py            # Django settings
+│   └── urls.py                # Root URL configuration
+└── WebBuilder/                # Main Django application
+    ├── models.py              # Data models
+    ├── forms.py               # Django forms
+    ├── admin.py               # Django admin registration
+    ├── urls.py                # URL patterns
+    ├── views/
+    │   ├── assistant.py       # Wizard: URL submission & plan review
+    │   ├── auth.py            # Login/register + n8n webhooks
+    │   ├── site.py            # Generation, download, deploy, versions
+    │   ├── history.py         # Analysis and site history
+    │   ├── edit.py            # In-browser file editor
+    │   ├── metrics.py         # Usage metrics
+    │   └── pages.py           # Static pages (home, profile)
+    ├── utils/
+    │   ├── ingest/
+    │   │   ├── url_reader.py  # HTTP fetch + file upload reading
+    │   │   └── parsers.py     # JSON/XML parsing & summarisation
+    │   ├── analysis/
+    │   │   ├── builder.py     # build_analysis() orchestrator
+    │   │   ├── detection.py   # Main collection path detection
+    │   │   └── helpers.py     # get_by_path() and utilities
+    │   ├── llm/
+    │   │   ├── client.py      # OpenAI-compatible HTTP client
+    │   │   ├── planner.py     # generate_site_plan() — analysis phase
+    │   │   ├── generator_prompts.py  # All generation prompt builders
+    │   │   ├── consistency_checker.py # Post-generation validation
+    │   │   ├── enrich_prompt.py  # User prompt enrichment
+    │   │   ├── field_extractor.py  # Extract model fields from code
+    │   │   ├── llm_catalog.py   # Built-in model catalog
+    │   │   └── llm_utils.py     # Shared LLM utilities
+    │   └── generator/
+    │       ├── project_generator.py  # 8-step generation orchestrator
+    │       ├── llm_wrappers.py  # Logged LLM calls
+    │       ├── static_files.py  # settings.py, Dockerfile, etc.
+    │       ├── fallbacks.py     # Deterministic fallbacks
+    │       └── migrations_generator.py  # Auto-generate 0001_initial.py
+    └── templates/
+        └── WebBuilder/        # Jinja/Django HTML templates
+```
+
+## Key modules
+
+<AccordionGroup>
+  <Accordion title="views/">
+    Each view module maps to a distinct area of the UI.
+
+    | Module | Responsibility |
+    |---|---|
+    | `assistant.py` | Multi-step wizard: URL/file submission, API fetch, plan review, and plan acceptance. |
+    | `auth.py` | User login and registration views; fires outbound n8n webhooks on registration and login events. |
+    | `site.py` | Triggers generation, serves the ZIP download, initiates deployment, and manages version history. |
+    | `history.py` | Lists past `APIRequest` analyses and `GeneratedSite` records for the current user. |
+    | `edit.py` | In-browser code editor that reads and writes individual files inside `project_files`. |
+    | `metrics.py` | Aggregates usage statistics (generations per user, LLM call counts, etc.). |
+    | `pages.py` | Renders the marketing home page and the user profile/settings page. |
+  </Accordion>
+
+  <Accordion title="utils/ingest/">
+    Handles all data ingestion before the LLM is involved.
+
+    - **`url_reader.py`** — performs the HTTP GET request to the submitted API URL, or reads an uploaded file. Returns the raw text.
+    - **`parsers.py`** — detects whether the content is JSON or XML, parses it into a Python structure, and produces a `response_summary` string.
+  </Accordion>
+
+  <Accordion title="utils/analysis/">
+    Analyses the parsed data to produce the inputs the planner LLM needs.
+
+    - **`builder.py`** — `build_analysis()` orchestrator: calls detection, extracts `available_keys` and `examples`, and stores results on the `APIRequest`.
+    - **`detection.py`** — locates the main collection path inside a nested JSON/XML structure (e.g. `["results", 0]`).
+    - **`helpers.py`** — `get_by_path()` utility and other shared helpers used by detection and builder.
+  </Accordion>
+
+  <Accordion title="utils/llm/">
+    All LLM interaction logic.
+
+    | Module | Responsibility |
+    |---|---|
+    | `client.py` | Thin OpenAI-compatible HTTP client used by every LLM call. Respects per-user custom endpoints. |
+    | `planner.py` | `generate_site_plan()` — analysis-phase LLM call that produces `field_mapping`. |
+    | `generator_prompts.py` | Six prompt-builder functions, one per generation step. |
+    | `consistency_checker.py` | `check_consistency()` and `fix_template()` — post-generation validation and cleanup. |
+    | `enrich_prompt.py` | `enrich_user_prompt()` — expands the user's optional free-text prompt with dataset context. |
+    | `field_extractor.py` | `extract_model_fields()` — parses the generated `models.py` text to get the actual field name list. |
+    | `llm_catalog.py` | Registry of built-in model identifiers available on the platform. |
+    | `llm_utils.py` | `safe_dumps()`, `parse_llm_json()`, and other shared utilities. |
+  </Accordion>
+
+  <Accordion title="utils/generator/">
+    Orchestrates assembling the final project file tree.
+
+    | Module | Responsibility |
+    |---|---|
+    | `project_generator.py` | `generate_project_files()` — 8-step orchestrator; returns `{path: content}`. |
+    | `llm_wrappers.py` | `llm_call_logged()` and `llm_json_call()` — wraps LLM calls and writes `GenerationLog` records. |
+    | `static_files.py` | `build_static_files()` — deterministic scaffolding: `manage.py`, `settings.py`, `Dockerfile`, `entrypoint.sh`, auth templates, and more. |
+    | `fallbacks.py` | Deterministic fallback implementations for every LLM-generated file, used when the LLM returns empty output. |
+    | `migrations_generator.py` | `generate_initial_migration()` — parses the generated `models.py` and writes a valid `0001_initial.py` without running `makemigrations`. |
+  </Accordion>
+</AccordionGroup>

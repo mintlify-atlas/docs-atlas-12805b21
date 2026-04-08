@@ -1,0 +1,147 @@
+---
+title: "LLM providers"
+description: "Connect WebBuilder to any OpenAI-compatible LLM provider."
+---
+
+WebBuilder generates Django project files by calling an LLM. It uses the standard OpenAI `/chat/completions` format, so it works with any provider that implements that API — OpenRouter, Groq, Ollama, OpenAI, and others.
+
+## Configuration
+
+Set these three variables in your `.env` file:
+
+```ini .env
+LLM_BASE_URL=https://openrouter.ai/api/v1
+LLM_API_KEY=your_api_key_here
+LLM_MODEL=meta-llama/llama-3.3-70b-instruct:free
+```
+
+The defaults (from `settings.py`) are OpenRouter with `meta-llama/llama-3.3-70b-instruct:free`.
+
+---
+
+## Supported providers
+
+<Tabs>
+  <Tab title="OpenRouter">
+    ```ini .env
+    LLM_BASE_URL=https://openrouter.ai/api/v1
+    LLM_API_KEY=sk-or-...
+    LLM_MODEL=meta-llama/llama-3.3-70b-instruct:free
+    ```
+
+    OpenRouter aggregates hundreds of models, including several free-tier options. Get an API key at [openrouter.ai](https://openrouter.ai).
+  </Tab>
+  <Tab title="Groq">
+    ```ini .env
+    LLM_BASE_URL=https://api.groq.com/openai/v1
+    LLM_API_KEY=gsk_...
+    LLM_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
+    ```
+
+    Groq provides the fastest inference available. Get an API key at [console.groq.com](https://console.groq.com).
+  </Tab>
+  <Tab title="Ollama (local)">
+    ```ini .env
+    LLM_BASE_URL=http://localhost:11434/v1
+    LLM_API_KEY=ollama
+    LLM_MODEL=llama3
+    ```
+
+    No API key is required. Set `LLM_API_KEY` to any non-empty string to satisfy the client. Make sure Ollama is running locally and the model is pulled.
+
+    <Note>
+      Ollama must be running and reachable from the WebBuilder process. If both run in Docker, use the container's service name instead of `localhost`.
+    </Note>
+  </Tab>
+  <Tab title="OpenAI">
+    ```ini .env
+    LLM_BASE_URL=https://api.openai.com/v1
+    LLM_API_KEY=sk-...
+    LLM_MODEL=gpt-4o
+    ```
+
+    Standard OpenAI API. Get an API key at [platform.openai.com](https://platform.openai.com).
+  </Tab>
+</Tabs>
+
+### Provider reference
+
+| Provider | `LLM_BASE_URL` | Notes |
+|---|---|---|
+| OpenRouter | `https://openrouter.ai/api/v1` | Free-tier models available |
+| Groq | `https://api.groq.com/openai/v1` | Fastest inference |
+| Ollama (local) | `http://localhost:11434/v1` | No API key needed |
+| OpenAI | `https://api.openai.com/v1` | GPT-4o etc. |
+
+---
+
+## Client function
+
+All LLM calls go through a single function in `WebBuilder/utils/llm/client.py`:
+
+```python
+def chat_completion(
+    user_text: str,
+    system_text: str | None = None,
+    *,
+    temperature: float = 0.2,
+    model: str | None = None,
+    base_url: str | None = None,
+    api_key: str | None = None,
+) -> str:
+```
+
+`model`, `base_url`, and `api_key` are optional overrides. When omitted, the function falls back to `LLM_MODEL`, `LLM_BASE_URL`, and `LLM_API_KEY` from Django settings.
+
+### Request headers
+
+Every request includes:
+
+```http
+Authorization: Bearer <api_key>
+Content-Type: application/json
+X-Title: WebBuilder
+HTTP-Referer: http://localhost:8000
+```
+
+---
+
+## Per-user override
+
+In their profile settings, each user can supply their own base URL, model, and API key. The per-user values take precedence over the server `.env` values.
+
+This lets individual users connect their own API accounts or use different models without touching the server configuration.
+
+---
+
+## Error handling
+
+`LLMError` is raised when:
+
+- The HTTP response is 4xx or 5xx
+- The response body is missing the expected `choices[0].message.content` field
+- A network-level error occurs (timeout, connection refused, etc.)
+
+When `LLMError` is raised during site generation, WebBuilder falls back to deterministic templates to produce the project files without LLM output.
+
+<Warning>
+  An empty `LLM_API_KEY` will raise `LLMError` immediately before any network request is made. Make sure the key is set in `.env` and that `load_dotenv()` is called at startup.
+</Warning>
+
+---
+
+## Built-in model catalog
+
+WebBuilder ships with a curated list of recommended models in `WebBuilder/utils/llm/llm_catalog.py`:
+
+| Model | Provider | Notes |
+|---|---|---|
+| `meta-llama/llama-4-scout-17b-16e-instruct` | Groq | Fast, good code quality, free |
+| `meta-llama/llama-3.3-70b-instruct:free` | OpenRouter | More capable, free on OpenRouter |
+| `qwen/qwen3-coder:free` | OpenRouter | Specialized for HTML/CSS generation, free |
+
+These appear as options in the model selection dropdown in the assistant wizard.
+
+<Tip>
+  Test your provider configuration by opening the assistant and running a simple analysis before attempting a full site generation. This confirms the key, base URL, and model are all working correctly.
+</Tip>
